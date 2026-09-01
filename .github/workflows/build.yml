@@ -24,6 +24,7 @@ jobs:
       # --- Build the main bridge binary ---
       - name: Build bridge (g++)
         run: |
+          mkdir -p build
           g++ -std=c++17 -O2 -Wall -Wextra \
               -Iinclude -Isrc -pthread \
               src/main.cpp src/bridge.cpp src/plugin_loader.cpp src/json.cpp \
