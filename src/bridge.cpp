@@ -170,6 +170,24 @@ std::string BambuBridge::get_host_for_login() {
     }
     return host;
 }
+
+std::string BambuBridge::build_login_cmd() {
+    if (!has_agent() || !fn_build_login_cmd) return {};
+    return fn_build_login_cmd(agent_);
+}
+std::string BambuBridge::build_logout_cmd() {
+    if (!has_agent() || !fn_build_logout_cmd) return {};
+    return fn_build_logout_cmd(agent_);
+}
+std::string BambuBridge::build_login_info() {
+    if (!has_agent() || !fn_build_login_info) return {};
+    return fn_build_login_info(agent_);
+}
+void BambuBridge::set_on_user_login(OnUserLoginFn fn) {
+    if (!has_agent() || !fn_set_on_user_login_fn) return;
+    fn_set_on_user_login_fn(agent_, fn);
+}
+
 std::string BambuBridge::get_user_selected_machine() {
     if (!has_agent() || !fn_get_user_selected_machine) return {};
     return fn_get_user_selected_machine(agent_);
@@ -436,6 +454,10 @@ bool BambuBridge::resolve_symbols(std::string* err) {
     fn_get_my_token                 = load_sym<func_get_my_token>(S("bambu_network_get_my_token"));
     fn_get_my_profile               = load_sym<func_get_my_profile>(S("bambu_network_get_my_profile"));
     fn_change_user                  = load_sym<func_change_user>(S("bambu_network_change_user"));
+    fn_build_login_cmd              = load_sym<func_build_login_cmd>(S("bambu_network_build_login_cmd"));
+    fn_build_logout_cmd             = load_sym<func_build_logout_cmd>(S("bambu_network_build_logout_cmd"));
+    fn_build_login_info             = load_sym<func_build_login_info>(S("bambu_network_build_login_info"));
+    fn_set_on_user_login_fn         = load_sym<func_set_on_user_login_fn>(S("bambu_network_set_on_user_login_fn"));
     fn_get_user_tasks               = load_sym<func_get_user_tasks>(S("bambu_network_get_user_tasks"));
     fn_get_printer_firmware         = load_sym<func_get_printer_firmware>(S("bambu_network_get_printer_firmware"));
     fn_get_slice_info               = load_sym<func_get_slice_info>(S("bambu_network_get_slice_info"));

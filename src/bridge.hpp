@@ -108,6 +108,11 @@ public:
     // If the plugin returns a .com host but country is CN, this maps it to .cn
     // (and vice versa). Used to build the correct login URL.
     std::string get_host_for_login();
+    // Plugin-provided login guidance: these ask the plugin what it wants.
+    std::string build_login_cmd();
+    std::string build_logout_cmd();
+    std::string build_login_info();
+    void set_on_user_login(OnUserLoginFn fn);
     std::string get_user_selected_machine();
     int  set_user_selected_machine(const std::string& dev_id);
     std::string get_studio_info_url();
@@ -194,6 +199,10 @@ private:
     func_get_my_token                 fn_get_my_token                 = nullptr;
     func_get_my_profile               fn_get_my_profile               = nullptr;
     func_change_user                  fn_change_user                 = nullptr;
+    func_build_login_cmd              fn_build_login_cmd             = nullptr;
+    func_build_logout_cmd             fn_build_logout_cmd            = nullptr;
+    func_build_login_info             fn_build_login_info            = nullptr;
+    func_set_on_user_login_fn         fn_set_on_user_login_fn        = nullptr;
     func_get_user_tasks               fn_get_user_tasks               = nullptr;
     func_get_printer_firmware         fn_get_printer_firmware         = nullptr;
     func_get_slice_info               fn_get_slice_info               = nullptr;
