@@ -1,0 +1,112 @@
+#include "bridge.hpp"
+#include "plugin_loader.hpp"
+#include "stdio_transport.hpp"
+#include "http_server.hpp"
+#include "rpc_handler.hpp"
+#include "json.hpp"
+
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <thread>
+#include <atomic>
+#include <chrono>
+
+using namespace bambu;
+
+namespace {
+
+void usage(const char* prog) {
+    std::fprintf(stderr,
+        "Usage: %s [options]\n"
+        "\n"
+        "Options:\n"
+        "  --plugin-dir <path>      Directory containing bamboo_networking(.so/.dll) and friends\n"
+        "  --country <US|CN>        Region (default: CN)\n"
+        "  --config-dir <path>      Plugin config directory\n"
+        "  --log-dir <path>         Plugin log directory\n"
+        "  --cert <file>            Optional cert file\n"
+        "  --http <port>            Enable HTTP/REST server on given port (0 = disabled)\n"
+        "  --stdio                  Enable stdio JSON-RPC mode (default: enabled if --http not given)\n"
+        "  --no-stdio               Disable stdio JSON-RPC mode\n"
+        "  --help                   Show this help\n",
+        prog);
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    AgentConfig cfg;
+    int  http_port = 0;
+    bool use_stdio = false;
+    bool http_given = false;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string a = argv[i];
+        auto next = [&](const char* name) -> const char* {
+            if (i + 1 >= argc) { std::fprintf(stderr, "%s requires a value\n", name); return nullptr; }
+            return argv[++i];
+        };
+        if (a == "--plugin-dir") { const char* v = next("--plugin-dir"); if (v) cfg.plugin_dir = v; }
+        else if (a == "--country") { const char* v = next("--country"); if (v) cfg.country_code = v; }
+        else if (a == "--config-dir") { const char* v = next("--config-dir"); if (v) cfg.config_dir = v; }
+        else if (a == "--log-dir") { const char* v = next("--log-dir"); if (v) cfg.log_dir = v; }
+        else if (a == "--cert") { const char* v = next("--cert"); if (v) cfg.cert_file = v; }
+        else if (a == "--http") { const char* v = next("--http"); if (v) http_port = atoi(v); http_given = true; }
+        else if (a == "--stdio") { use_stdio = true; }
+        else if (a == "--no-stdio") { use_stdio = false; }
+        else if (a == "--help") { usage(argv[0]); return 0; }
+        else { std::fprintf(stderr, "unknown option: %s\n", a.c_str()); usage(argv[0]); return 1; }
+    }
+
+    // Default country.
+    if (cfg.country_code.empty()) cfg.country_code = "CN";
+
+    // Default transport: if --http not given, enable stdio by default.
+    if (!http_given && !use_stdio) use_stdio = true;
+
+    if (!init_sockets()) { std::fprintf(stderr, "[bridge] socket init failed\n"); return 1; }
+
+    BambuBridge bridge;
+
+    std::string err;
+    if (!bridge.load_plugin(cfg, &err)) {
+        std::fprintf(stderr, "[bridge] FAILED to load plugin: %s\n", err.c_str());
+        std::fprintf(stderr, "[bridge] plugin dir: %s\n", cfg.plugin_dir.c_str());
+        return 1;
+    }
+    std::fprintf(stdout, "[bridge] plugin loaded, version=%s\n", bridge.version().c_str());
+    std::fflush(stdout);
+
+    // Create the agent.
+    int ac = bridge.create_agent(cfg.log_dir);
+    if (ac != 0) {
+        std::fprintf(stderr, "[bridge] create_agent failed: %d\n", ac);
+        return 1;
+    }
+    std::fprintf(stdout, "[bridge] agent created\n");
+    std::fflush(stdout);
+
+    // Start HTTP on a background thread (runs alongside stdio, if enabled).
+    if (http_port > 0) {
+        if (!start_http_server(bridge, http_port)) {
+            std::fprintf(stderr, "[bridge] failed to start HTTP server on port %d\n", http_port);
+            return 1;
+        }
+    }
+
+    if (use_stdio) {
+        // stdio loop owns the main thread; HTTP, if any, runs in background.
+        run_stdio(bridge);
+    } else if (http_port > 0) {
+        // HTTP only: keep the process alive.
+        while (true) std::this_thread::sleep_for(std::chrono::seconds(3600));
+    } else {
+        std::fprintf(stderr, "[bridge] no transport enabled\n");
+        return 1;
+    }
+
+    stop_http_server();
+    bridge.destroy_agent();
+    return 0;
+}

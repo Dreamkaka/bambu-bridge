@@ -1,0 +1,80 @@
+name: Build Bambu Bridge
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Build & Self-Test (Linux g++)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y g++ make cmake
+
+      - name: Show toolchain
+        run: g++ --version && cmake --version
+
+      # --- Build the main bridge binary ---
+      - name: Build bridge (g++)
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra \
+              -Iinclude -Isrc -pthread \
+              src/main.cpp src/bridge.cpp src/plugin_loader.cpp src/json.cpp \
+              src/rpc_handler.cpp src/stdio_transport.cpp src/http_server.cpp \
+              -o build/bambu-bridge
+
+      # --- Build the plugin-independent self-test ---
+      - name: Build self-test
+        run: |
+          g++ -std=c++17 -O2 -Wall -Wextra \
+              -Iinclude -Isrc \
+              src/self_test.cpp src/bridge.cpp src/plugin_loader.cpp src/json.cpp \
+              src/rpc_handler.cpp src/stdio_transport.cpp src/http_server.cpp \
+              -o build/bambu-bridge-self-test
+
+      # --- Run self-test (does NOT need the plugin) ---
+      - name: Run self-test
+        run: ./build/bambu-bridge-self-test
+
+      # --- Smoke test: CLI help works ---
+      - name: Smoke test CLI
+        run: |
+          ./build/bambu-bridge --help >/dev/null && echo "CLI OK"
+
+      # --- Upload the Linux binary as an artifact (no plugin needed) ---
+      - name: Upload bridge binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bamboo-bridge-linux
+          path: build/bambu-bridge
+          if-no-files-found: error
+
+  build-windows-msvc:
+    name: Build (Windows MSVC — ABI compatible with bamboo_networking.dll)
+    runs-on: windows-latest
+    # MSVC is the ONLY way to ABI-correctly call the MSVC-built .dll on Windows.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build with MSVC (CMake)
+        run: |
+          cmake -S . -B build_msvc -DCMAKE_BUILD_TYPE=Release
+          cmake --build build_msvc --config Release --target bambu-bridge
+
+      - name: Upload Windows binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bamboo-bridge-windows-msvc
+          path: build_msvc/Release/bambu-bridge.exe
+          if-no-files-found: error

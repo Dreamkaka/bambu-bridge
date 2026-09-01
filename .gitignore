@@ -1,0 +1,55 @@
+# ============================================================================
+# Bambu Bridge — build / local artifacts
+#
+# These are generated products or local-only assets that must NOT be
+# committed.  IMPORTANT: the Bambu plugin directories (win_02.05.02.76,
+# linux_02.05.02.58) contain CLOSED-SOURCE vendor DLLs/SOs; do not push them.
+# ============================================================================
+
+# ---- build outputs ---------------------------------------------------------
+# CMake & direct-g++ build directories (any name containing "build")
+build/
+build_*/
+/build/
+build_msvc/
+build_cmake/
+
+# Compiled binaries / objects
+*.o
+*.obj
+*.exe
+*.out
+bambu-bridge
+bambu-bridge.exe
+
+# ---- Bambu closed-source plugin dirs (DO NOT COMMIT) ------------------------
+# These hold bamboo_networking.dll/.so + BambuSource/live555/agora libs.
+# They live OUTSIDE the repo (in ../win_02.05.02.76 and ../linux_02.05.02.58),
+# but ignore any copy that lands inside via patterns below.
+win_*/
+linux_*/
+win_02.05.02.76/
+linux_02.05.02.58/
+**/win_02.05.02.76/
+**/linux_02.05.02.58/
+
+# ---- logs / runtime state ---------------------------------------------------
+*.log
+Hook.log
+IDAHook.log
+*.tmp
+*.tmp.*
+*.pid
+
+# ---- editor / IDE -----------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ---- CI aux ----------------------------------------------------------------
+# (keep .github; ignore any stray artifact dirs)
+downloads/
+artifacts/
