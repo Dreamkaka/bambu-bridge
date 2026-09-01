@@ -104,6 +104,10 @@ public:
     std::string get_user_name();
     std::string get_user_avatar();
     std::string get_bambulab_host();
+    // Returns the Bambu web host appropriate for the configured country code.
+    // If the plugin returns a .com host but country is CN, this maps it to .cn
+    // (and vice versa). Used to build the correct login URL.
+    std::string get_host_for_login();
     std::string get_user_selected_machine();
     int  set_user_selected_machine(const std::string& dev_id);
     std::string get_studio_info_url();
@@ -157,6 +161,7 @@ private:
     EventSink* sink_ = nullptr;
     std::string last_error_;
     std::string plugin_dir_;
+    std::string country_code_;
 
     // RAW function pointers (func_* typedefs from bambu_abi.hpp).
     func_get_version                  fn_get_version                  = nullptr;

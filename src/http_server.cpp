@@ -138,6 +138,7 @@ void send_response(sock_t s, int status, const std::string& ct, const std::strin
 // ---- runtime state ---------------------------------------------------------
 std::atomic<bool> g_running{false};
 sock_t g_listen = 0;
+int    g_http_port = 0;
 std::thread g_accept_thread;
 BambuBridge* g_bridge = nullptr;
 
@@ -168,18 +169,70 @@ public:
     }
 };
 
+// ---- URL/query helpers ------------------------------------------------------
+std::string url_decode(const std::string& in) {
+    std::string out;
+    out.reserve(in.size());
+    for (size_t i = 0; i < in.size(); ++i) {
+        if (in[i] == '%' && i + 2 < in.size()) {
+            auto hex = [](char c) -> int {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return -1;
+            };
+            int hi = hex(in[i+1]), lo = hex(in[i+2]);
+            if (hi >= 0 && lo >= 0) { out.push_back((char)((hi << 4) | lo)); i += 2; }
+            else out.push_back(in[i]);
+        } else if (in[i] == '+') {
+            out.push_back(' ');
+        } else {
+            out.push_back(in[i]);
+        }
+    }
+    return out;
+}
+
+std::string url_encode(const std::string& in) {
+    static const char* hex = "0123456789ABCDEF";
+    std::string out;
+    for (unsigned char c : in) {
+        bool unreserved = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                          (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~';
+        if (unreserved) out.push_back((char)c);
+        else { out.push_back('%'); out.push_back(hex[c >> 4]); out.push_back(hex[c & 15]); }
+    }
+    return out;
+}
+
+// Extract a query parameter value (first match) from a query string.
+std::string url_query_param(const std::string& query, const std::string& key) {
+    std::string needle = key + "=";
+    size_t pos = 0;
+    while (pos < query.size()) {
+        size_t amp = query.find('&', pos);
+        std::string tok = query.substr(pos, amp == std::string::npos ? std::string::npos : amp - pos);
+        if (tok.compare(0, needle.size(), needle) == 0)
+            return url_decode(tok.substr(needle.size()));
+        if (amp == std::string::npos) break;
+        pos = amp + 1;
+    }
+    return "";
+}
+
 void handle_conn(sock_t s) {
     std::string first_line, body;
     if (!read_request(s, &first_line, &body)) { close_sock(s); return; }
 
-    std::string method, path;
+    std::string method, path, query;
     {
         std::istringstream iss(first_line);
         iss >> method >> path;
     }
-    // strip query from path
-    size_t q = path.find('?');
-    if (q != std::string::npos) path = path.substr(0, q);
+    {
+        size_t q = path.find('?');
+        if (q != std::string::npos) { query = path.substr(q + 1); path = path.substr(0, q); }
+    }
 
     if (path == "/health") {
         Json r = Json::object();
@@ -188,6 +241,63 @@ void handle_conn(sock_t s) {
         r.set("version", Json::s(ver));
         r.set("loaded", Json::boolean(g_bridge && g_bridge->is_loaded()));
         send_response(s, 200, "application/json", json_dump(r));
+        close_sock(s);
+        return;
+    }
+
+    // ---- OAuth login (Bambu Studio style) --------------------------------
+    if (path == "/login-url") {
+        std::string host = g_bridge ? g_bridge->get_host_for_login() : "";
+        std::string redirect = std::string("http://127.0.0.1:") + std::to_string(g_http_port) + "/sign-in/callback";
+        std::string login_url = host + "/sign-in?from=studio&source=portal&slicerLoginType=ticket&to=" + url_encode(redirect);
+        Json r = Json::object();
+        r.set("ok", Json::boolean(true));
+        r.set("host", Json::s(host));
+        r.set("redirect_url", Json::s(redirect));
+        r.set("url", Json::s(login_url));
+        send_response(s, 200, "application/json", json_dump(r));
+        close_sock(s);
+        return;
+    }
+
+    if (path == "/login") {
+        std::string host = g_bridge ? g_bridge->get_host_for_login() : "";
+        std::string redirect = std::string("http://127.0.0.1:") + std::to_string(g_http_port) + "/sign-in/callback";
+        std::string login_url = host + "/sign-in?from=studio&source=portal&slicerLoginType=ticket&to=" + url_encode(redirect);
+        std::string hdr = "HTTP/1.1 302 Found\r\nLocation: " + login_url + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+        send_all(s, hdr);
+        close_sock(s);
+        return;
+    }
+
+    if (path == "/sign-in/callback") {
+        std::string ticket = url_query_param(query, "ticket");
+        if (ticket.empty()) {
+            send_response(s, 200, "text/html", "<html><body><h2>Authentication failed</h2><p>No ticket in callback.</p></body></html>");
+            close_sock(s);
+            return;
+        }
+        // Build a login_with_ticket RPC request and run it through the bridge.
+        Json req = Json::object();
+        req.set("method", Json::s("login_with_ticket"));
+        Json prm = Json::object();
+        prm.set("ticket", Json::s(ticket));
+        req.set("params", prm);
+        Json resp = handle_request(*g_bridge, req);
+        const Json* ok = resp.find("ok");
+        bool success = ok && ok->kind == Json::Bool && ok->b;
+        // Tell the /events SSE about the login result.
+        if (g_bridge) {
+            Json ev = Json::object();
+            ev.set("event", Json::s("login_result"));
+            ev.set("payload", Json::object().set("success", Json::boolean(success)));
+            std::lock_guard<std::mutex> lk(g_event_mtx);
+            g_events.push_back("event: login_result\ndata: " + json_dump(ev) + "\n\n");
+        }
+        std::string page = success
+            ? "<html><head><meta charset=\"utf-8\"><style>body{font-family:Arial,sans-serif;margin:32px;}a.button{display:inline-block;padding:10px 16px;background:#0f8bff;color:#fff;text-decoration:none;border-radius:6px;}</style></head><body><h2>Authentication complete</h2><p>You can return to your app. This window will close.</p><a class=\"button\" href=\"/health\">OK</a></body></html>"
+            : "<html><head><meta charset=\"utf-8\"><style>body{font-family:Arial,sans-serif;margin:32px;}</style></head><body><h2>Authentication failed</h2><p>Something went wrong. Please try again.</p></body></html>";
+        send_response(s, 200, "text/html", page);
         close_sock(s);
         return;
     }
@@ -249,6 +359,7 @@ bool init_sockets() {
 
 bool start_http_server(BambuBridge& bridge, int port) {
     g_bridge = &bridge;
+    g_http_port = port;
     // Register a sink that broadcasts to SSE clients.
     static HttpEventSink sink;
     bridge.set_event_sink(&sink);

@@ -67,6 +67,8 @@ int BambuBridge::create_agent(const std::string& log_dir) {
     if (!loaded_ || !fn_create_agent) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     if (agent_) return BAMBU_NETWORK_SUCCESS;
     agent_ = fn_create_agent(log_dir);
+    if (agent_ && !country_code_.empty() && fn_set_country_code)
+        fn_set_country_code(agent_, country_code_);
     return agent_ ? BAMBU_NETWORK_SUCCESS : BAMBU_NETWORK_ERR_INVALID_HANDLE;
 }
 
@@ -81,6 +83,7 @@ int BambuBridge::destroy_agent() {
 // plugin setup
 // ---------------------------------------------------------------------------
 int BambuBridge::set_country_code(const std::string& cc) {
+    country_code_ = cc;
     if (!has_agent() || !fn_set_country_code) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     return fn_set_country_code(agent_, cc);
 }
@@ -139,6 +142,33 @@ std::string BambuBridge::get_user_avatar() {
 std::string BambuBridge::get_bambulab_host() {
     if (!has_agent() || !fn_get_bambulab_host) return {};
     return fn_get_bambulab_host(agent_);
+}
+
+std::string BambuBridge::get_host_for_login() {
+    std::string host = get_bambulab_host();
+    bool cn = (country_code_ == "CN");
+    // Force the correct TLD for the configured country, regardless of what the
+    // plugin returned. This makes the login URL match the account region.
+    auto has = [&](const std::string& sub) { return host.find(sub) != std::string::npos; };
+    if (cn) {
+        // Prefer .cn; if host is bambulab.com or a *.bambulab.com, remap to .cn.
+        if (has("bambulab.com")) {
+            size_t p = host.find("bambulab.com");
+            host = host.substr(0, p) + "bambulab.cn" + host.substr(p + std::string("bambulab.com").size());
+        } else if (has("bambulab.cn")) {
+            // already cn
+        } else if (host.empty()) {
+            host = "https://bambulab.cn";
+        }
+    } else {
+        if (has("bambulab.cn")) {
+            size_t p = host.find("bambulab.cn");
+            host = host.substr(0, p) + "bambulab.com" + host.substr(p + std::string("bambulab.cn").size());
+        } else if (host.empty()) {
+            host = "https://bambulab.com";
+        }
+    }
+    return host;
 }
 std::string BambuBridge::get_user_selected_machine() {
     if (!has_agent() || !fn_get_user_selected_machine) return {};
