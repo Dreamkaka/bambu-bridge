@@ -197,6 +197,86 @@ int BambuBridge::get_my_profile(const std::string& token, std::string* http_body
     if (!has_agent() || !fn_get_my_profile) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     unsigned c = 0; int r = fn_get_my_profile(agent_, token, &c, http_body); set_opt(http_code, c); return r;
 }
+
+int BambuBridge::change_user(const std::string& user_info) {
+    if (!has_agent() || !fn_change_user) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
+    return fn_change_user(agent_, user_info);
+}
+
+// Build a canonical login payload the same way OrcaSlicer's
+// build_canonical_login_payload() does, from a token JSON string and a profile
+// JSON string. We hand-roll the JSON to avoid depending on the Json serializer
+// here, since the plugin only needs the fields present.
+static std::string json_field(const std::string& json, const char* key) {
+    // Very small extractor for "key":"value" or "key":N.
+    std::string pat = std::string("\"") + key + "\"";
+    size_t pos = json.find(pat);
+    if (pos == std::string::npos) return "";
+    size_t colon = json.find(':', pos + pat.size());
+    if (colon == std::string::npos) return "";
+    size_t i = colon + 1;
+    while (i < json.size() && (json[i] == ' ' || json[i] == '\t')) ++i;
+    if (i < json.size() && json[i] == '"') {
+        std::string out;
+        ++i;
+        while (i < json.size() && json[i] != '"') {
+            if (json[i] == '\\' && i + 1 < json.size()) { out += json[i + 1]; i += 2; }
+            else out += json[i++];
+        }
+        return out;
+    }
+    size_t start = i;
+    while (i < json.size() && json[i] != ',' && json[i] != '}' && json[i] != ' ') ++i;
+    return json.substr(start, i - start);
+}
+
+int BambuBridge::login_with_ticket(const std::string& ticket, std::string* err) {
+    // 1. ticket -> access token
+    std::string token_body, profile_body;
+    unsigned tcode = 0;
+    int tr = get_my_token(ticket, &token_body, &tcode);
+    if (tr != 0) { if (err) *err = "get_my_token failed: " + std::to_string(tr); return tr; }
+    std::string access = json_field(token_body, "accessToken");
+    if (access.empty()) access = json_field(token_body, "access_token");
+    if (access.empty()) access = json_field(token_body, "token");
+    if (access.empty()) { if (err) *err = "no accessToken in token response"; return BAMBU_NETWORK_ERR_INVALID_RESULT; }
+
+    // 2. profile
+    unsigned pcode = 0;
+    int pr = get_my_profile(access, &profile_body, &pcode);
+    if (pr != 0) { if (err) *err = "get_my_profile failed: " + std::to_string(pr); return pr; }
+
+    // 3. build canonical payload
+    std::string refresh = json_field(token_body, "refreshToken");
+    std::string exp     = json_field(token_body, "expiresIn");
+    std::string rexp    = json_field(token_body, "refreshExpiresIn");
+    std::string uid     = json_field(profile_body, "uidStr");
+    if (uid.empty()) uid = json_field(profile_body, "uid");
+    if (uid.empty()) uid = json_field(profile_body, "id");
+    std::string name    = json_field(profile_body, "name");
+    std::string account = json_field(profile_body, "account");
+    std::string avatar  = json_field(profile_body, "avatar");
+
+    std::string payload =
+        "{\"command\":\"user_login\",\"data\":{"
+        "\"token\":\"" + access + "\","
+        "\"access_token\":\"" + access + "\","
+        "\"refresh_token\":\"" + refresh + "\","
+        "\"expires_in\":\"" + exp + "\","
+        "\"refresh_expires_in\":\"" + rexp + "\","
+        "\"user_id\":\"" + uid + "\","
+        "\"uidStr\":\"" + uid + "\","
+        "\"user\":{\"id\":\"" + uid + "\",\"uid\":\"" + uid + "\",\"uidStr\":\"" + uid +
+        "\",\"name\":\"" + name + "\",\"account\":\"" + account + "\",\"avatar\":\"" + avatar + "\"}}}";
+
+    // 4. present to plugin
+    int cu = change_user(payload);
+    if (cu != 0) { if (err) *err = "change_user failed: " + std::to_string(cu); return cu; }
+
+    // 5. verify
+    if (!is_user_login()) { if (err) *err = "is_user_login() false after change_user"; return BAMBU_NETWORK_ERR_INVALID_RESULT; }
+    return BAMBU_NETWORK_SUCCESS;
+}
 int BambuBridge::get_user_tasks(const std::string& dev_id, int status, int offset, int limit, std::string* http_body) {
     if (!has_agent() || !fn_get_user_tasks) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     TaskQueryParams p; p.dev_id = dev_id; p.status = status; p.offset = offset; p.limit = limit;
@@ -325,6 +405,7 @@ bool BambuBridge::resolve_symbols(std::string* err) {
     fn_get_model_mall_detail_url    = load_sym<func_get_model_mall_detail_url>(S("bambu_network_get_model_mall_detail_url"));
     fn_get_my_token                 = load_sym<func_get_my_token>(S("bambu_network_get_my_token"));
     fn_get_my_profile               = load_sym<func_get_my_profile>(S("bambu_network_get_my_profile"));
+    fn_change_user                  = load_sym<func_change_user>(S("bambu_network_change_user"));
     fn_get_user_tasks               = load_sym<func_get_user_tasks>(S("bambu_network_get_user_tasks"));
     fn_get_printer_firmware         = load_sym<func_get_printer_firmware>(S("bambu_network_get_printer_firmware"));
     fn_get_slice_info               = load_sym<func_get_slice_info>(S("bambu_network_get_slice_info"));

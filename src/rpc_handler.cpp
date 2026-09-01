@@ -86,6 +86,15 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
         if (m == "refresh_connection")  { return JsonNumber(bridge.refresh_connection()); }
         if (m == "is_user_login")       { return JsonBool(bridge.is_user_login()); }
         if (m == "user_logout")         { return JsonNumber(bridge.user_logout(bool_param(p, "request", true))); }
+        if (m == "change_user")         { return JsonNumber(bridge.change_user(str_param(p, "user_info"))); }
+        if (m == "login_with_ticket") {
+            std::string err;
+            int r = bridge.login_with_ticket(str_param(p, "ticket"), &err);
+            Json res = Json::object();
+            res.set("code", JsonNumber(r));
+            if (r != 0) res.set("error", JsonStr(err));
+            return resp_ok(res);
+        }
         if (m == "get_user_id")         { return JsonStr(bridge.get_user_id()); }
         if (m == "get_user_name")       { return JsonStr(bridge.get_user_name()); }
         if (m == "get_user_avatar")     { return JsonStr(bridge.get_user_avatar()); }

@@ -108,6 +108,14 @@ public:
     int  set_user_selected_machine(const std::string& dev_id);
     std::string get_studio_info_url();
 
+    // Establish a login session. The plugin uses Bambu Studio's OAuth flow:
+    // ticket -> access_token (get_my_token) -> profile (get_my_profile) ->
+    // change_user(payload) -> is_user_login().
+    // `payload` is the canonical login payload JSON (see rpc_handler "login").
+    int  change_user(const std::string& user_info);
+    // One-shot: give a ticket, returns 0 if login succeeded.
+    int  login_with_ticket(const std::string& ticket, std::string* err);
+
     // subscribe / MQTT
     int  add_subscribe(const std::vector<std::string>& dev_list);
     int  del_subscribe(const std::vector<std::string>& dev_list);
@@ -180,6 +188,7 @@ private:
     func_get_model_mall_detail_url    fn_get_model_mall_detail_url    = nullptr;
     func_get_my_token                 fn_get_my_token                 = nullptr;
     func_get_my_profile               fn_get_my_profile               = nullptr;
+    func_change_user                  fn_change_user                 = nullptr;
     func_get_user_tasks               fn_get_user_tasks               = nullptr;
     func_get_printer_firmware         fn_get_printer_firmware         = nullptr;
     func_get_slice_info               fn_get_slice_info               = nullptr;
