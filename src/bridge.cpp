@@ -528,12 +528,44 @@ void BambuBridge::enable_multi_machine(bool enable) {
 }
 int BambuBridge::send_message(const std::string& dev_id, const std::string& json_str, int qos, int flag) {
     if (!has_agent() || !fn_send_message) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
+    std::string e;
+    int ready = ensure_cloud_ready(dev_id, 15000, &e);
+    if (ready != BAMBU_NETWORK_SUCCESS) return ready;
     return fn_send_message(agent_, dev_id, json_str, qos, flag);
 }
 int BambuBridge::send_message_to_printer(const std::string& dev_id, const std::string& json_str, int qos, int flag) {
     if (!has_agent() || !fn_send_message_to_printer) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     return fn_send_message_to_printer(agent_, dev_id, json_str, qos, flag);
 }
+std::string BambuBridge::parse_printer_id(const std::string& topic) {
+    std::string id = topic;
+    if (id.rfind("tunnel/", 0) == 0) id = id.substr(7);
+    const std::string pref = "device/";
+    if (id.rfind(pref, 0) == 0) {
+        id = id.substr(pref.size());
+        size_t slash = id.find('/');
+        if (slash != std::string::npos) id = id.substr(0, slash);
+    }
+    return id;
+}
+
+void BambuBridge::mark_printer_mqtt(const std::string& dev_id) {
+    if (dev_id.empty()) return;
+    std::lock_guard<std::mutex> lk(wait_mtx_);
+    mqtt_ready_.insert(dev_id);
+    mqtt_cv_.notify_all();
+}
+
+bool BambuBridge::printer_mqtt_ready(const std::string& dev_id) const {
+    std::lock_guard<std::mutex> lk(wait_mtx_);
+    return mqtt_ready_.count(dev_id) != 0;
+}
+
+std::vector<std::string> BambuBridge::mqtt_ready_devices() const {
+    std::lock_guard<std::mutex> lk(wait_mtx_);
+    return std::vector<std::string>(mqtt_ready_.begin(), mqtt_ready_.end());
+}
+
 int BambuBridge::ensure_cloud_ready(const std::string& dev_id, int timeout_ms, std::string* err) {
     if (!has_agent()) {
         if (err) *err = "agent not created";
@@ -544,6 +576,7 @@ int BambuBridge::ensure_cloud_ready(const std::string& dev_id, int timeout_ms, s
         return BAMBU_NETWORK_ERR_CONNECT_FAILED;
     }
     if (fn_start_subscribe) fn_start_subscribe(agent_, "app");
+    if (fn_enable_multi_machine) fn_enable_multi_machine(agent_, true);
     if (!is_server_connected() && fn_connect_server) fn_connect_server(agent_);
     int waited = 0;
     while (!is_server_connected() && waited < timeout_ms) {
@@ -556,9 +589,28 @@ int BambuBridge::ensure_cloud_ready(const std::string& dev_id, int timeout_ms, s
         if (err) *err = "cloud MQTT not connected (is_server_connected=false)";
         return BAMBU_NETWORK_ERR_CONNECT_FAILED;
     }
-    if (!dev_id.empty()) {
+    if (dev_id.empty()) return BAMBU_NETWORK_SUCCESS;
+    if (printer_mqtt_ready(dev_id)) return BAMBU_NETWORK_SUCCESS;
+
+    add_subscribe({dev_id});
+    set_user_selected_machine(dev_id);
+
+    std::unique_lock<std::mutex> lk(wait_mtx_);
+    bool ok = mqtt_cv_.wait_for(lk, std::chrono::milliseconds(timeout_ms), [&] {
+        return mqtt_ready_.count(dev_id) != 0;
+    });
+    if (!ok) {
+        lk.unlock();
         add_subscribe({dev_id});
         set_user_selected_machine(dev_id);
+        lk.lock();
+        ok = mqtt_cv_.wait_for(lk, std::chrono::milliseconds(3000), [&] {
+            return mqtt_ready_.count(dev_id) != 0;
+        });
+    }
+    if (!ok) {
+        if (err) *err = "printer MQTT session not ready (no on_printer_connected). device may be offline";
+        return BAMBU_NETWORK_ERR_CONNECT_FAILED;
     }
     return BAMBU_NETWORK_SUCCESS;
 }
@@ -613,15 +665,24 @@ BambuBridge::CommandWait BambuBridge::printer_command_wait(const std::string& de
             return out;
         }
     }
-    out.code = lan ? send_message_to_printer(dev_id, json_str, qos, flag)
+    auto send_once = [&]() -> int {
+        return lan ? send_message_to_printer(dev_id, json_str, qos, flag)
                    : send_message(dev_id, json_str, qos, flag);
+    };
+    out.code = send_once();
+    if (out.code == BAMBU_NETWORK_ERR_CONNECT_FAILED && !lan) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        set_user_selected_machine(dev_id);
+        std::this_thread::sleep_for(std::chrono::milliseconds(800));
+        out.code = send_once();
+    }
     if (out.code != BAMBU_NETWORK_SUCCESS) {
         std::lock_guard<std::mutex> lk(wait_mtx_);
         pending_waits_.erase(std::remove(pending_waits_.begin(), pending_waits_.end(), waiter), pending_waits_.end());
         out.timed_out = false;
         if (out.code == BAMBU_NETWORK_ERR_CONNECT_FAILED)
             out.error = lan ? "LAN MQTT not connected; call connect_printer first"
-                            : "cloud MQTT send failed; wait for server_connected then retry";
+                            : "send_message -2: printer MQTT not attached (offline or subscribe failed)";
         return out;
     }
     if (timeout_ms <= 0) timeout_ms = 8000;
@@ -729,6 +790,11 @@ int BambuBridge::start_print(const Json& params_json, std::function<void(int, st
                              std::function<bool()> cancel_cb) {
     if (!has_agent() || !fn_start_print) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     PrintParams p = decode_print_params(params_json);
+    if (!p.dev_id.empty()) {
+        std::string e;
+        int ready = ensure_cloud_ready(p.dev_id, 15000, &e);
+        if (ready != BAMBU_NETWORK_SUCCESS) return ready;
+    }
     OnUpdateStatusFn update = [this, update_cb](int status, int code, std::string msg) {
         if (update_cb) update_cb(status, msg);
         Json ev = Json::object();
@@ -872,22 +938,14 @@ void BambuBridge::install_callbacks() {
     }
     if (fn_set_on_printer_connected_fn) {
         fn_set_on_printer_connected_fn(agent_, [this](std::string topic) {
+            std::string dev_id = parse_printer_id(topic);
+            mark_printer_mqtt(dev_id);
             Json ev = Json::object();
             ev.set("topic", Json::s(topic));
+            ev.set("dev_id", Json::s(dev_id));
             emit("on_printer_connected", ev);
-            std::string dev_id = topic;
-            if (dev_id.rfind("tunnel/", 0) == 0) dev_id = dev_id.substr(7);
-            if (!dev_id.empty()) {
-                Json cmd = Json::object();
-                Json pushing = Json::object();
-                pushing.set("sequence_id", Json::s("0"));
-                pushing.set("command", Json::s("pushall"));
-                pushing.set("version", Json::n(1));
-                pushing.set("push_target", Json::n(1));
-                cmd.set("pushing", pushing);
-                send_message(dev_id, json_dump(cmd), 0, 0);
-                if (fn_install_device_cert) fn_install_device_cert(agent_, dev_id, false);
-            }
+            if (!dev_id.empty() && fn_install_device_cert)
+                fn_install_device_cert(agent_, dev_id, false);
         });
     }
     if (fn_set_on_subscribe_failure_fn) {
@@ -903,6 +961,7 @@ void BambuBridge::install_callbacks() {
             ev.set("dev_id", Json::s(dev_id));
             ev.set("msg", Json::s(msg));
             ev.set("source", Json::s("cloud"));
+            mark_printer_mqtt(dev_id);
             note_printer_msg(dev_id, "cloud", msg);
             emit("on_message", ev);
         });

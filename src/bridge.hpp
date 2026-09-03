@@ -3,6 +3,7 @@
 
 #include <string>
 #include <map>
+#include <set>
 #include <vector>
 #include <functional>
 #include <memory>
@@ -156,6 +157,8 @@ public:
     std::string last_error() const { return last_error_; }
     std::string country_code() const { return country_code_; }
     bool agent_ready() const { return agent_ != nullptr && started_; }
+    bool printer_mqtt_ready(const std::string& dev_id) const;
+    std::vector<std::string> mqtt_ready_devices() const;
 
 private:
     bool resolve_symbols(std::string* err);
@@ -170,6 +173,8 @@ private:
     std::string find_cert_folder() const;
     int  after_login();
     void note_printer_msg(const std::string& dev_id, const std::string& source, const std::string& msg);
+    static std::string parse_printer_id(const std::string& topic);
+    void mark_printer_mqtt(const std::string& dev_id);
 
     PluginHandle net_, src_;
     std::vector<PluginHandle> companions_;
@@ -200,8 +205,10 @@ private:
         std::string msg;
     };
     mutable std::mutex wait_mtx_;
+    std::condition_variable mqtt_cv_;
     std::vector<std::shared_ptr<PendingWait>> pending_waits_;
     std::map<std::string, std::pair<std::string, std::string>> last_msg_;
+    std::set<std::string> mqtt_ready_;
 
     func_check_debug_consistent       fn_check_debug_consistent       = nullptr;
     func_get_version                  fn_get_version                  = nullptr;

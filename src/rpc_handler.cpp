@@ -93,6 +93,10 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
             res.set("user_name", Json::s(bridge.get_user_name()));
             res.set("country", Json::s(bridge.country_code()));
             res.set("host", Json::s(bridge.get_host_for_login()));
+            Json ready = Json::array();
+            for (const auto& id : bridge.mqtt_ready_devices())
+                ready.arr.push_back(Json::s(id));
+            res.set("mqtt_ready", ready);
             return resp_ok(res);
         }
 
@@ -171,13 +175,14 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
             res.set("msg", Json::s(w.msg));
             res.set("logged_in", Json::boolean(bridge.is_user_login()));
             res.set("server_connected", Json::boolean(bridge.is_server_connected()));
+            res.set("mqtt_ready", Json::boolean(bridge.printer_mqtt_ready(dev)));
             Json parsed;
             if (!w.msg.empty() && json_parse(w.msg, &parsed))
                 res.set("payload", parsed);
             if (!w.error.empty()) res.set("error", Json::s(w.error));
             else if (w.timed_out) res.set("error", Json::s("timeout waiting for printer message"));
-            else if (w.code == BAMBU_NETWORK_ERR_CONNECT_FAILED)
-                res.set("error", Json::s("connect failed (-2): not logged in or cloud MQTT not ready"));
+            else if (w.code == BAMBU_NETWORK_ERR_CONNECT_FAILED && w.error.empty())
+                res.set("error", Json::s("connect failed (-2): printer MQTT not ready"));
             return resp_ok(res);
         };
 

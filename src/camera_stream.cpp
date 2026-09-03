@@ -288,6 +288,14 @@ std::string resolve_camera_url(BambuBridge& bridge, const std::string& dev_id,
                                     lan_passwd, lan_proto.empty() ? "local" : lan_proto,
                                     dev_id, bridge.version(), dev_ver);
     }
+    {
+        std::string e;
+        int ready = bridge.ensure_cloud_ready(dev_id, 15000, &e);
+        if (ready != 0) {
+            if (err) *err = e.empty() ? ("ensure_cloud_ready failed: " + std::to_string(ready)) : e;
+            return {};
+        }
+    }
     std::string proto = protocols.empty() ? "\"tutk\",\"agora\"" : protocols;
     std::string key = dev_id;
     if (!dev_ver.empty() || !proto.empty()) {
