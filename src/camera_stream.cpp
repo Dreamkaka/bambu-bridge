@@ -9,12 +9,6 @@
 #include <thread>
 #include <algorithm>
 
-#if defined(_WIN32)
-#  include <windows.h>
-#else
-#  include <unistd.h>
-#endif
-
 namespace bambu {
 
 namespace {
@@ -203,7 +197,7 @@ std::vector<unsigned char> pes_packets(const unsigned char* nal, size_t n,
             pkt[3] = (unsigned char)(0x10 | (cc & 0x0f));
         }
         cc = (cc + 1) & 0x0f;
-        size_t take = std::min(payload_room, remain);
+        size_t take = payload_room < remain ? payload_room : remain;
         std::memcpy(pkt + header, pes.data() + off, take);
         out.insert(out.end(), pkt, pkt + 188);
         off += take;

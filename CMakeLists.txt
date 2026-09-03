@@ -34,7 +34,7 @@ add_executable(bambu-bridge
 target_include_directories(bambu-bridge PRIVATE include src)
 
 if(WIN32)
-    target_compile_definitions(bambu-bridge PRIVATE _WIN32_WINNT=0x0601)
+    target_compile_definitions(bambu-bridge PRIVATE _WIN32_WINNT=0x0601 _CRT_SECURE_NO_WARNINGS NOMINMAX)
     target_link_libraries(bambu-bridge PRIVATE ws2_32)
 else()
     find_package(Threads REQUIRED)
@@ -57,7 +57,7 @@ add_executable(bambu-bridge-self-test
 )
 target_include_directories(bambu-bridge-self-test PRIVATE include src)
 if(WIN32)
-    target_compile_definitions(bambu-bridge-self-test PRIVATE _WIN32_WINNT=0x0601)
+    target_compile_definitions(bambu-bridge-self-test PRIVATE _WIN32_WINNT=0x0601 _CRT_SECURE_NO_WARNINGS NOMINMAX)
     target_link_libraries(bambu-bridge-self-test PRIVATE ws2_32)
 else()
     target_link_libraries(bambu-bridge-self-test PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
