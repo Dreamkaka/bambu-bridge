@@ -169,10 +169,15 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
             res.set("dev_id", Json::s(w.dev_id));
             res.set("source", Json::s(w.source));
             res.set("msg", Json::s(w.msg));
+            res.set("logged_in", Json::boolean(bridge.is_user_login()));
+            res.set("server_connected", Json::boolean(bridge.is_server_connected()));
             Json parsed;
             if (!w.msg.empty() && json_parse(w.msg, &parsed))
                 res.set("payload", parsed);
-            if (w.timed_out) res.set("error", Json::s("timeout waiting for printer message"));
+            if (!w.error.empty()) res.set("error", Json::s(w.error));
+            else if (w.timed_out) res.set("error", Json::s("timeout waiting for printer message"));
+            else if (w.code == BAMBU_NETWORK_ERR_CONNECT_FAILED)
+                res.set("error", Json::s("connect failed (-2): not logged in or cloud MQTT not ready"));
             return resp_ok(res);
         };
 

@@ -144,7 +144,9 @@ public:
         std::string dev_id;
         std::string source;
         std::string msg;
+        std::string error;
     };
+    int  ensure_cloud_ready(const std::string& dev_id, int timeout_ms = 10000, std::string* err = nullptr);
     CommandWait printer_command_wait(const std::string& dev_id, const std::string& json_str, bool lan,
                                      int timeout_ms = 8000, int qos = 0, int flag = 0);
     std::string last_printer_msg(const std::string& dev_id) const;

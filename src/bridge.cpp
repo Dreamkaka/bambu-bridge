@@ -534,7 +534,41 @@ int BambuBridge::send_message_to_printer(const std::string& dev_id, const std::s
     if (!has_agent() || !fn_send_message_to_printer) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     return fn_send_message_to_printer(agent_, dev_id, json_str, qos, flag);
 }
+int BambuBridge::ensure_cloud_ready(const std::string& dev_id, int timeout_ms, std::string* err) {
+    if (!has_agent()) {
+        if (err) *err = "agent not created";
+        return BAMBU_NETWORK_ERR_INVALID_HANDLE;
+    }
+    if (!is_user_login()) {
+        if (err) *err = "not logged in; open GET /login first";
+        return BAMBU_NETWORK_ERR_CONNECT_FAILED;
+    }
+    if (fn_start_subscribe) fn_start_subscribe(agent_, "app");
+    if (!is_server_connected() && fn_connect_server) fn_connect_server(agent_);
+    int waited = 0;
+    while (!is_server_connected() && waited < timeout_ms) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        waited += 200;
+        if (!is_server_connected() && fn_connect_server && waited % 2000 == 0)
+            fn_connect_server(agent_);
+    }
+    if (!is_server_connected()) {
+        if (err) *err = "cloud MQTT not connected (is_server_connected=false)";
+        return BAMBU_NETWORK_ERR_CONNECT_FAILED;
+    }
+    if (!dev_id.empty()) {
+        add_subscribe({dev_id});
+        set_user_selected_machine(dev_id);
+    }
+    return BAMBU_NETWORK_SUCCESS;
+}
+
 int BambuBridge::printer_command(const std::string& dev_id, const std::string& json_str, bool lan, int qos, int flag) {
+    if (!lan) {
+        std::string e;
+        int ready = ensure_cloud_ready(dev_id, 10000, &e);
+        if (ready != BAMBU_NETWORK_SUCCESS) return ready;
+    }
     return lan ? send_message_to_printer(dev_id, json_str, qos, flag)
                : send_message(dev_id, json_str, qos, flag);
 }
@@ -569,11 +603,25 @@ BambuBridge::CommandWait BambuBridge::printer_command_wait(const std::string& de
         std::lock_guard<std::mutex> lk(wait_mtx_);
         pending_waits_.push_back(waiter);
     }
-    out.code = printer_command(dev_id, json_str, lan, qos, flag);
+    if (!lan) {
+        int ready = ensure_cloud_ready(dev_id, timeout_ms > 0 ? timeout_ms : 10000, &out.error);
+        if (ready != BAMBU_NETWORK_SUCCESS) {
+            std::lock_guard<std::mutex> lk(wait_mtx_);
+            pending_waits_.erase(std::remove(pending_waits_.begin(), pending_waits_.end(), waiter), pending_waits_.end());
+            out.code = ready;
+            out.timed_out = false;
+            return out;
+        }
+    }
+    out.code = lan ? send_message_to_printer(dev_id, json_str, qos, flag)
+                   : send_message(dev_id, json_str, qos, flag);
     if (out.code != BAMBU_NETWORK_SUCCESS) {
         std::lock_guard<std::mutex> lk(wait_mtx_);
         pending_waits_.erase(std::remove(pending_waits_.begin(), pending_waits_.end(), waiter), pending_waits_.end());
         out.timed_out = false;
+        if (out.code == BAMBU_NETWORK_ERR_CONNECT_FAILED)
+            out.error = lan ? "LAN MQTT not connected; call connect_printer first"
+                            : "cloud MQTT send failed; wait for server_connected then retry";
         return out;
     }
     if (timeout_ms <= 0) timeout_ms = 8000;
