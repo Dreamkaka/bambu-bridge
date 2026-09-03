@@ -27,6 +27,7 @@ void usage(const char* prog) {
         "  --config-dir <path>      Plugin config directory\n"
         "  --log-dir <path>         Plugin log directory\n"
         "  --cert <folder>          Directory containing slicer_base64.cer\n"
+        "  --client-version <ver>   X-BBL-Client-Version / camera net_ver (default: plugin get_version)\n"
         "  --http <port>            Enable HTTP/REST server on given port (0 = disabled)\n"
         "  --stdio                  Enable stdio JSON-RPC mode (default: enabled if --http not given)\n"
         "  --no-stdio               Disable stdio JSON-RPC mode\n"
@@ -53,6 +54,7 @@ int main(int argc, char** argv) {
         else if (a == "--config-dir") { const char* v = next("--config-dir"); if (v) cfg.config_dir = v; }
         else if (a == "--log-dir") { const char* v = next("--log-dir"); if (v) cfg.log_dir = v; }
         else if (a == "--cert") { const char* v = next("--cert"); if (v) cfg.cert_folder = v; }
+        else if (a == "--client-version") { const char* v = next("--client-version"); if (v) cfg.client_version = v; }
         else if (a == "--http") { const char* v = next("--http"); if (v) http_port = atoi(v); http_given = true; }
         else if (a == "--stdio") { use_stdio = true; }
         else if (a == "--no-stdio") { use_stdio = false; }
@@ -76,7 +78,8 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "[bridge] plugin dir: %s\n", cfg.plugin_dir.c_str());
         return 1;
     }
-    std::fprintf(stdout, "[bridge] plugin loaded, version=%s\n", bridge.version().c_str());
+    std::fprintf(stdout, "[bridge] plugin loaded, version=%s client_version=%s\n",
+                 bridge.version().c_str(), bridge.client_version().c_str());
     std::fflush(stdout);
 
     std::string init_err;

@@ -87,6 +87,7 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
             res.set("loaded", Json::boolean(bridge.is_loaded()));
             res.set("agent_ready", Json::boolean(bridge.agent_ready()));
             res.set("version", Json::s(bridge.version()));
+            res.set("client_version", Json::s(bridge.client_version()));
             res.set("logged_in", Json::boolean(bridge.is_user_login()));
             res.set("server_connected", Json::boolean(bridge.is_server_connected()));
             res.set("user_id", Json::s(bridge.get_user_id()));

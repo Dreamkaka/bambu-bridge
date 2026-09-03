@@ -239,6 +239,7 @@ void handle_conn(sock_t s) {
         r.set("ok", Json::boolean(true));
         std::string ver = g_bridge ? g_bridge->version() : "";
         r.set("version", Json::s(ver));
+        r.set("client_version", Json::s(g_bridge ? g_bridge->client_version() : ""));
         r.set("loaded", Json::boolean(g_bridge && g_bridge->is_loaded()));
         r.set("agent_ready", Json::boolean(g_bridge && g_bridge->agent_ready()));
         r.set("logged_in", Json::boolean(g_bridge && g_bridge->is_user_login()));

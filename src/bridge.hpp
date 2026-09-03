@@ -59,6 +59,7 @@ struct AgentConfig {
     std::string cert_file;
     std::string cert_folder;
     std::string cert_filename;
+    std::string client_version;
 };
 
 class BambuBridge {
@@ -76,6 +77,7 @@ public:
     int  create_agent(const std::string& log_dir);
     int  destroy_agent();
     std::string version();
+    std::string client_version() const;
 
     int  set_country_code(const std::string& cc);
     int  set_config_dir(const std::string& dir);
@@ -186,6 +188,7 @@ private:
     std::string last_error_;
     std::string plugin_dir_;
     std::string country_code_;
+    std::string client_version_override_;
     std::string config_dir_;
     std::string log_dir_;
     std::string cert_folder_;

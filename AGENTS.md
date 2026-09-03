@@ -84,6 +84,7 @@ cl /std:c++17 /O2 /Iinclude /Isrc /D_WIN32_WINNT=0x0601 ^
 - **Login**: Browser `GET /login` (ticket OAuth) → `/sign-in/callback` → `get_my_token` + `get_my_profile` → canonical `change_user` payload → `start_subscribe("app")` + `connect_server`. Devices: `list_printers` / `get_user_print_info`. Control: `add_subscribe` + `send_message` (cloud) or `send_message_to_printer` (LAN).
 - **Cert**: `--cert <folder>` or auto-detect `slicer_base64.cer` (OrcaSlicer `resources/cert`).
 - **Camera**: `GET /camera.ts?dev_id=` uses `BambuSource` (`Bambu_Create/Open/StartStream/ReadSample`) and remuxes H264 into MPEG-TS. Cloud URL is `get_camera_url("{id}|{ver}|\"tutk\",\"agora\"")`. LAN: `?ip=&password=&proto=local|rtsp|rtsps`. Not a real RTSP server.
+- **Client version**: `--client-version` overrides `X-BBL-Client-Version` and camera `net_ver`. Default is `bambu_network_get_version()` from the loaded plugin.
 - **Transport Flags**:
   - If `--http <port>` is omitted and `--no-stdio` is not set, `--stdio` is automatically active.
   - To run HTTP server only in background: `bambu-bridge --plugin-dir <dir> --http 8080 --no-stdio`.

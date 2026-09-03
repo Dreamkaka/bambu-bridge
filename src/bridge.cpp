@@ -209,6 +209,7 @@ bool BambuBridge::load_plugin(const AgentConfig& cfg, std::string* err_) {
     log_dir_ = cfg.log_dir;
     cert_folder_ = cfg.cert_folder;
     cert_filename_ = cfg.cert_filename.empty() ? "slicer_base64.cer" : cfg.cert_filename;
+    client_version_override_ = cfg.client_version;
     if (!cfg.cert_file.empty() && cert_folder_.empty())
         cert_folder_ = cfg.cert_file;
 
@@ -246,6 +247,13 @@ void BambuBridge::unload() {
 }
 
 std::string BambuBridge::version() { return get_version_str(); }
+
+std::string BambuBridge::client_version() const {
+    if (!client_version_override_.empty()) return client_version_override_;
+    std::string v;
+    if (fn_get_version) v = fn_get_version();
+    return v;
+}
 
 int BambuBridge::create_agent(const std::string& log_dir) {
     if (!loaded_ || !fn_create_agent) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
@@ -1036,7 +1044,7 @@ void BambuBridge::apply_studio_http_headers() {
     std::map<std::string, std::string> h;
     h["X-BBL-Client-Type"] = "slicer";
     h["X-BBL-Client-Name"] = "BambuStudio";
-    h["X-BBL-Client-Version"] = "02.05.02.51";
+    h["X-BBL-Client-Version"] = client_version();
     h["X-BBL-Device-ID"] = uuid;
 #if defined(_WIN32)
     h["X-BBL-OS-Type"] = "windows";

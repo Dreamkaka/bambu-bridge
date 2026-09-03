@@ -29,6 +29,7 @@ VLC / ffplay / 浏览器 mpegts.js
 
 - `--plugin-dir` 里要有 `BambuSource.dll`（或 `libBambuSource.so`）以及 `live555` 等 companion  
 - 进程开了 `--http <port>`  
+- 云端身份：`--client-version`（默认用插件 `get_version()`），写入 HTTP 头 `X-BBL-Client-Version` 和拉流 URL 的 `net_ver`  
 - **云端**：已登录；打开 `/camera.ts` 时会自动 `add_subscribe` + 选中该机  
 - **局域网**：要知道 IP 和 access code（`list_printers` 的 `dev_access_code`，或打印机屏幕）
 

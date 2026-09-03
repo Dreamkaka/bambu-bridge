@@ -43,6 +43,7 @@ Linux：
 | `--config-dir <path>` | 插件配置目录（登录态会写在这里） | `~/bambu-bridge` 或 `%APPDATA%\bambu-bridge` |
 | `--log-dir <path>` | 插件日志目录 | `<config-dir>/log` |
 | `--cert <folder>` | 含 `slicer_base64.cer` 的目录（公开 TLS 证书，不是私钥） | 自动探测 |
+| `--client-version <ver>` | 上报给云端的 `X-BBL-Client-Version` 和摄像头 `net_ver` | 插件 `get_version()` |
 | `--http <port>` | 开 HTTP 服务 | 未指定则不开 HTTP |
 | `--stdio` | 开 stdin/stdout JSON-RPC | 未指定 `--http` 时默认开 |
 | `--no-stdio` | 只开 HTTP | |

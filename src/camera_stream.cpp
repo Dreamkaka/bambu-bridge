@@ -279,6 +279,14 @@ std::string build_lan_camera_url(const std::string& ip, const std::string& user,
     return url;
 }
 
+const Json* find_ipcam(const Json& root) {
+    const Json* p = root.find("print");
+    if (p) {
+        if (const Json* c = p->find("ipcam")) return c;
+    }
+    return root.find("ipcam");
+}
+
 std::string ota_from_json(const std::string& msg) {
     Json j;
     if (msg.empty() || !json_parse(msg, &j)) return {};
@@ -292,6 +300,42 @@ std::string ota_from_json(const std::string& msg) {
             return ver->str;
     }
     return {};
+}
+
+void collect_camera_protocols(const std::string& msg, const std::string& requested, std::vector<std::string>& out) {
+    auto add = [&](const std::string& s) {
+        if (s.empty()) return;
+        for (const auto& x : out) if (x == s) return;
+        out.push_back(s);
+    };
+    if (!requested.empty()) add(requested);
+    Json j;
+    if (!msg.empty() && json_parse(msg, &j)) {
+        const Json* ipcam = find_ipcam(j);
+        std::string tutk;
+        std::string remote;
+        if (ipcam) {
+            if (const Json* t = ipcam->find("tutk_server"))
+                if (t->kind == Json::String) tutk = t->str;
+            const Json* lv = ipcam->find("liveview");
+            if (lv) {
+                if (const Json* r = lv->find("remote"))
+                    if (r->kind == Json::String) remote = r->str;
+            }
+        }
+        if (tutk == "disable") {
+            add("\"agora\"");
+        } else if (remote == "agora") {
+            add("\"agora\"");
+        } else if (remote == "tutk") {
+            add("\"tutk\"");
+        } else if (remote == "tutk_agaro" || remote == "tutk_agora") {
+            add("\"tutk\",\"agora\"");
+        }
+    }
+    add("\"tutk\",\"agora\"");
+    add("\"agora\"");
+    add("\"tutk\"");
 }
 
 std::string resolve_ota_version(BambuBridge& bridge, const std::string& dev_id, const std::string& given) {
@@ -316,7 +360,7 @@ std::string resolve_camera_url(BambuBridge& bridge, const std::string& dev_id,
     if (!lan_ip.empty()) {
         return build_lan_camera_url(lan_ip, lan_user.empty() ? "bblp" : lan_user,
                                     lan_passwd, lan_proto.empty() ? "local" : lan_proto,
-                                    dev_id, bridge.version(), dev_ver);
+                                     dev_id, bridge.client_version(), dev_ver);
     }
     {
         std::string e;
@@ -327,24 +371,30 @@ std::string resolve_camera_url(BambuBridge& bridge, const std::string& dev_id,
         }
     }
     std::string ver = resolve_ota_version(bridge, dev_id, dev_ver);
-    std::string proto = protocols.empty() ? "\"tutk\",\"agora\"" : protocols;
-    std::string key = dev_id + "|" + ver + "|" + proto;
-    std::string url;
-    int r = bridge.get_camera_url(key, &url);
-    if (r != 0 || url.empty() || url.rfind("bambu:///", 0) != 0) {
-        std::string raw = url.empty() ? ("code=" + std::to_string(r)) : url;
-        if (err) {
-            *err = "get_camera_url failed: " + raw
-                + " (dev_ver=" + (ver.empty() ? std::string("<empty>") : ver) + ")";
-            if (raw.find("403") != std::string::npos)
-                *err += " cloud camera 403: need OTA version, or tutk disabled, or try LAN ?ip=&password=";
+    std::vector<std::string> tries;
+    collect_camera_protocols(bridge.last_printer_msg(dev_id), protocols, tries);
+    std::string url, last_raw, last_key;
+    for (const auto& proto : tries) {
+        last_key = dev_id + "|" + ver + "|" + proto;
+        url.clear();
+        int r = bridge.get_camera_url(last_key, &url);
+        if (r == 0 && !url.empty() && url.rfind("bambu:///", 0) == 0) {
+            url += "&device=" + dev_id;
+            url += "&net_ver=" + bridge.client_version();
+            if (!ver.empty()) url += "&dev_ver=" + ver;
+            return url;
         }
-        return {};
+        last_raw = url.empty() ? ("code=" + std::to_string(r)) : url;
+        if (last_raw.find("403") == std::string::npos && r == 0) break;
     }
-    url += "&device=" + dev_id;
-    url += "&net_ver=" + bridge.version();
-    if (!ver.empty()) url += "&dev_ver=" + ver;
-    return url;
+    if (err) {
+        *err = "get_camera_url failed: " + last_raw
+            + " (key=" + last_key + ")";
+        if (last_raw.find("403") != std::string::npos)
+            *err += " cloud 403: printer may have LAN-only liveview (tutk disabled). "
+                    "Use /camera.ts?dev_id=&ip=&password=&proto=local";
+    }
+    return {};
 }
 
 int stream_camera_mpegts(const std::string& bambu_url, const std::atomic<bool>& running,
