@@ -31,6 +31,8 @@ namespace bambu {
 // Start the HTTP server on the given port and run the accept loop on a new
 // thread.  Returns false if the socket could not be bound.
 // On Linux/macOS call init_sockets() (no-op) before this.
+int http_listen_port();
+std::string build_login_url(const std::string& host, int port, const std::string& locale = "zh-CN");
 bool start_http_server(BambuBridge& bridge, int port);
 
 // Stop the server and join its thread.

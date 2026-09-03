@@ -1,4 +1,5 @@
 #include "rpc_handler.hpp"
+#include "http_server.hpp"
 #include "json.hpp"
 
 #include <string>
@@ -130,9 +131,12 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
         if (m == "get_user_nickname") return ok_str(bridge.get_user_nickname());
         if (m == "get_bambulab_host") return ok_str(bridge.get_bambulab_host());
         if (m == "get_login_url") {
+            std::string host = bridge.get_host_for_login();
+            int port = http_listen_port();
+            std::string locale = (bridge.country_code() == "CN") ? "zh-CN" : "en";
             Json res = Json::object();
-            res.set("host", Json::s(bridge.get_host_for_login()));
-            res.set("url", Json::s(bridge.get_host_for_login() + "/sign-in"));
+            res.set("host", Json::s(host));
+            res.set("url", Json::s(port > 0 ? build_login_url(host, port, locale) : host + "/sign-in"));
             return resp_ok(res);
         }
         if (m == "get_user_selected_machine") return ok_str(bridge.get_user_selected_machine());

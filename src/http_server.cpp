@@ -205,7 +205,6 @@ std::string url_encode(const std::string& in) {
     return out;
 }
 
-// Extract a query parameter value (first match) from a query string.
 std::string url_query_param(const std::string& query, const std::string& key) {
     std::string needle = key + "=";
     size_t pos = 0;
@@ -248,14 +247,17 @@ void handle_conn(sock_t s) {
     }
 
     // ---- OAuth login (Bambu Studio style) --------------------------------
+    auto locale = []() -> std::string {
+        return (g_bridge && g_bridge->country_code() == "CN") ? "zh-CN" : "en";
+    };
+
     if (path == "/login-url") {
         std::string host = g_bridge ? g_bridge->get_host_for_login() : "";
-        std::string redirect = std::string("http://127.0.0.1:") + std::to_string(g_http_port) + "/sign-in/callback";
-        std::string login_url = host + "/sign-in?from=studio&source=portal&slicerLoginType=ticket&to=" + url_encode(redirect);
+        std::string login_url = build_login_url(host, g_http_port, locale());
         Json r = Json::object();
         r.set("ok", Json::boolean(true));
         r.set("host", Json::s(host));
-        r.set("redirect_url", Json::s(redirect));
+        r.set("redirect_url", Json::s("http://localhost:" + std::to_string(g_http_port)));
         r.set("url", Json::s(login_url));
         send_response(s, 200, "application/json", json_dump(r));
         close_sock(s);
@@ -264,21 +266,15 @@ void handle_conn(sock_t s) {
 
     if (path == "/login") {
         std::string host = g_bridge ? g_bridge->get_host_for_login() : "";
-        std::string redirect = std::string("http://127.0.0.1:") + std::to_string(g_http_port) + "/sign-in/callback";
-        std::string login_url = host + "/sign-in?from=studio&source=portal&slicerLoginType=ticket&to=" + url_encode(redirect);
+        std::string login_url = build_login_url(host, g_http_port, locale());
         std::string hdr = "HTTP/1.1 302 Found\r\nLocation: " + login_url + "\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
         send_all(s, hdr);
         close_sock(s);
         return;
     }
 
-    if (path == "/sign-in/callback") {
-        std::string ticket = url_query_param(query, "ticket");
-        if (ticket.empty()) {
-            send_response(s, 200, "text/html", "<html><body><h2>Authentication failed</h2><p>No ticket in callback.</p></body></html>");
-            close_sock(s);
-            return;
-        }
+    std::string ticket = url_query_param(query, "ticket");
+    if (!ticket.empty()) {
         // Build a login_with_ticket RPC request and run it through the bridge.
         Json req = Json::object();
         req.set("method", Json::s("login_with_ticket"));
@@ -305,6 +301,12 @@ void handle_conn(sock_t s) {
             ? "<html><head><meta charset=\"utf-8\"><style>body{font-family:Arial,sans-serif;margin:32px;}a.button{display:inline-block;padding:10px 16px;background:#0f8bff;color:#fff;text-decoration:none;border-radius:6px;}</style></head><body><h2>Authentication complete</h2><p>You can return to your app. This window will close.</p><a class=\"button\" href=\"/health\">OK</a></body></html>"
             : "<html><head><meta charset=\"utf-8\"><style>body{font-family:Arial,sans-serif;margin:32px;}</style></head><body><h2>Authentication failed</h2><p>Something went wrong. Please try again.</p></body></html>";
         send_response(s, 200, "text/html", page);
+        close_sock(s);
+        return;
+    }
+
+    if (path == "/sign-in/callback") {
+        send_response(s, 200, "text/html", "<html><body><h2>Authentication failed</h2><p>No ticket in callback.</p></body></html>");
         close_sock(s);
         return;
     }
@@ -362,6 +364,32 @@ bool init_sockets() {
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
 #endif
     return true;
+}
+
+int http_listen_port() { return g_http_port; }
+
+std::string build_login_url(const std::string& host_in, int port, const std::string& locale) {
+    std::string host = host_in;
+    while (!host.empty() && host.back() == '/') host.pop_back();
+    if (host.rfind("http://", 0) != 0 && host.rfind("https://", 0) != 0)
+        host = "https://bambulab.com";
+    std::string lang = locale.empty() ? "en" : locale;
+    auto enc = [](const std::string& in) {
+        static const char* hex = "0123456789ABCDEF";
+        std::string out;
+        for (unsigned char c : in) {
+            bool unreserved = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                              (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~';
+            if (unreserved) out.push_back((char)c);
+            else { out.push_back('%'); out.push_back(hex[c >> 4]); out.push_back(hex[c & 15]); }
+        }
+        return out;
+    };
+    std::string localhost = "http://localhost:" + std::to_string(port);
+    std::string callback = host + "/sign-in/callback?source=portal&locale=" + enc(lang)
+        + "&redirect_url=" + enc(localhost)
+        + "&openBy=suite&from=studio&slicerLoginType=ticket";
+    return host + "/sign-in?&from=studio&source=portal&to=" + enc(callback);
 }
 
 bool start_http_server(BambuBridge& bridge, int port) {
