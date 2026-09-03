@@ -90,15 +90,37 @@ static void test_rpc_missing_method() {
     CHECK(ok && ok->kind == Json::Bool && ok->b == false, "missing method -> ok:false");
 }
 
+static void test_rpc_wrapped_response() {
+    BambuBridge bridge;
+    Json req = Json::object();
+    req.set("method", Json::s("version"));
+    req.set("params", Json::object());
+    Json resp = handle_request(bridge, req);
+    const Json* ok = resp.find("ok");
+    CHECK(ok && ok->kind == Json::Bool && ok->b == true, "version -> ok:true");
+    const Json* result = resp.find("result");
+    CHECK(result && result->kind == Json::String && result->str.empty(), "unloaded version result is empty string");
+
+    Json login = Json::object();
+    login.set("method", Json::s("is_user_login"));
+    Json lresp = handle_request(bridge, login);
+    const Json* lok = lresp.find("ok");
+    CHECK(lok && lok->kind == Json::Bool && lok->b == true, "is_user_login -> ok:true");
+    const Json* lres = lresp.find("result");
+    CHECK(lres && lres->kind == Json::Bool && lres->b == false, "unloaded is_user_login is false");
+}
+
 static void test_bridge_safe_calls() {
     BambuBridge bridge;   // no plugin loaded
-    // These must NOT crash; they should return safe defaults / error codes.
     CHECK(bridge.version().empty(), "no-plugin version() returns empty");
     CHECK(bridge.is_loaded() == false, "no-plugin is_loaded() false");
     int r = bridge.create_agent("/tmp");
-    (void)r; // may be anything, but must not crash
+    (void)r;
     std::string id = bridge.get_user_id();
-    (void)id; // empty, no crash
+    (void)id;
+    std::string err;
+    int ir = bridge.init_agent(&err);
+    CHECK(ir != 0, "init_agent without plugin fails");
     CHECK(true, "bridge safe calls do not crash");
 }
 
@@ -107,6 +129,7 @@ int main() {
     test_json_roundtrip();
     test_rpc_unknown_method();
     test_rpc_missing_method();
+    test_rpc_wrapped_response();
     test_bridge_safe_calls();
     if (g_fails == 0) {
         std::fprintf(stdout, "ALL SELF-TESTS PASSED\n");

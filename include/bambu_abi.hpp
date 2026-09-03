@@ -41,7 +41,14 @@
 #define BAMBU_NETWORK_ERR_CONNECT_FAILED          -2
 #define BAMBU_NETWORK_ERR_SEND_MSG_FAILED         -4
 #define BAMBU_NETWORK_ERR_TIMEOUT                -17
+#define BAMBU_NETWORK_ERR_CANCELED               -18
 #define BAMBU_NETWORK_ERR_INVALID_RESULT         -19
+
+enum class MessageFlag : int {
+    MSG_FLAG_NONE = 0,
+    MSG_SIGN      = 1 << 0,
+    MSG_ENCRYPT   = 1 << 1,
+};
 
 // ----------------------------------------------------------------------------
 // Callback signatures (std::function) expected by the plugin.
@@ -146,6 +153,7 @@ struct PublishParams {
 // Function-pointer typedefs (the plugin's exported callable entries).
 // Names match exactly the exports used by GetProcAddress/dlsym.
 // ----------------------------------------------------------------------------
+typedef bool (*func_check_debug_consistent)(bool is_debug);
 typedef std::string (*func_get_version)(void);
 typedef void* (*func_create_agent)(std::string log_dir);
 typedef int (*func_destroy_agent)(void* agent);

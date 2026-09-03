@@ -42,7 +42,7 @@ public:
 
 void run_stdio(BambuBridge& bridge) {
     StdioEventSink sink;
-    bridge.set_event_sink(&sink);
+    bridge.add_event_sink(&sink);
 
     std::string line;
     while (std::getline(std::cin, line)) {

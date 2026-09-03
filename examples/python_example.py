@@ -2,17 +2,23 @@
 # ============================================================================
 # python_example.py - talk to bambu-bridge over HTTP/REST JSON.
 #
-#   ./build/bambu-bridge --plugin-dir ./linux_02.05.02.58 --country CN \
+#   ./build/bambu-bridge --plugin-dir ../linux_02.05.02.58 --country CN \
 #                        --http 8080 --no-stdio
 #   python3 examples/python_example.py
+#
+# Login:
+#   1. Open http://127.0.0.1:8080/login in a browser
+#   2. Complete Bambu account login
+#   3. Callback hits /sign-in/callback and installs the session
 # ============================================================================
 import json
+import sys
 import requests
 
 BASE = "http://127.0.0.1:8080"
 
 
-def rpc(method, params=None, timeout=20.0):
+def rpc(method, params=None, timeout=30.0):
     r = requests.post(BASE + "/rpc", json={"method": method, "params": params or {}},
                       timeout=timeout)
     r.raise_for_status()
@@ -21,34 +27,39 @@ def rpc(method, params=None, timeout=20.0):
 
 if __name__ == "__main__":
     try:
+        print("health:", requests.get(BASE + "/health", timeout=5).json())
+        print("status:", rpc("status"))
         print("version:", rpc("version"))
-        print("create_agent:", rpc("create_agent", {"log_dir": "/tmp"}))
-        print("set_country_code:", rpc("set_country_code", {"country_code": "CN"}))
-        print("connect_server:", rpc("connect_server"))
-        print("is_server_connected:", rpc("is_server_connected"))
         print("is_user_login:", rpc("is_user_login"))
-        print("user_id:", rpc("get_user_id"))
-        print("user_name:", rpc("get_user_name"))
 
-        serial = "22E8BJ630901079"
+        st = rpc("status").get("result") or {}
+        if not st.get("logged_in"):
+            login = requests.get(BASE + "/login-url", timeout=5).json()
+            print("not logged in. open this URL in a browser:")
+            print(" ", login.get("url"))
+            print("then re-run this script.")
+            sys.exit(0)
+
+        print("user:", rpc("get_user_name"), rpc("get_user_id"))
+        printers = rpc("list_printers")
+        print("printers:", printers)
+
+        body = ((printers.get("result") or {}).get("http_body")) or "{}"
+        devices = []
+        try:
+            devices = json.loads(body).get("devices") or []
+        except Exception:
+            pass
+        if not devices:
+            print("no cloud printers bound to this account")
+            sys.exit(0)
+
+        serial = devices[0].get("dev_id")
+        print("using:", serial, devices[0].get("dev_name"))
         print("add_subscribe:", rpc("add_subscribe", {"dev_list": [serial]}))
-
-        # Ask printer to push full state (plugin signs it -> resolves mqtt verify failed)
-        push = rpc("send_message_to_printer", {
-            "dev_id": serial,
-            "json_str": json.dumps({"pushing": {"sequence_id": "0", "command": "pushall"}}),
-            "qos": 0,
-            "flag": 0,
-        })
-        print("pushall:", push)
-
-        # Pause
-        pause = rpc("send_message_to_printer", {
-            "dev_id": serial,
-            "json_str": json.dumps({"print": {"sequence_id": "0", "command": "pause"}}),
-            "qos": 0,
-            "flag": 0,
-        })
-        print("pause:", pause)
+        print("set_user_selected_machine:", rpc("set_user_selected_machine", {"dev_id": serial}))
+        print("pushall:", rpc("pushall", {"dev_id": serial}))
+        print("pause:", rpc("pause", {"dev_id": serial}))
     except Exception as e:
         print("ERROR:", e)
+        sys.exit(1)

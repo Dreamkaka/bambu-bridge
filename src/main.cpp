@@ -6,6 +6,7 @@
 #include "json.hpp"
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <string>
 #include <thread>
@@ -25,7 +26,7 @@ void usage(const char* prog) {
         "  --country <US|CN>        Region (default: CN)\n"
         "  --config-dir <path>      Plugin config directory\n"
         "  --log-dir <path>         Plugin log directory\n"
-        "  --cert <file>            Optional cert file\n"
+        "  --cert <folder>          Directory containing slicer_base64.cer\n"
         "  --http <port>            Enable HTTP/REST server on given port (0 = disabled)\n"
         "  --stdio                  Enable stdio JSON-RPC mode (default: enabled if --http not given)\n"
         "  --no-stdio               Disable stdio JSON-RPC mode\n"
@@ -51,7 +52,7 @@ int main(int argc, char** argv) {
         else if (a == "--country") { const char* v = next("--country"); if (v) cfg.country_code = v; }
         else if (a == "--config-dir") { const char* v = next("--config-dir"); if (v) cfg.config_dir = v; }
         else if (a == "--log-dir") { const char* v = next("--log-dir"); if (v) cfg.log_dir = v; }
-        else if (a == "--cert") { const char* v = next("--cert"); if (v) cfg.cert_file = v; }
+        else if (a == "--cert") { const char* v = next("--cert"); if (v) cfg.cert_folder = v; }
         else if (a == "--http") { const char* v = next("--http"); if (v) http_port = atoi(v); http_given = true; }
         else if (a == "--stdio") { use_stdio = true; }
         else if (a == "--no-stdio") { use_stdio = false; }
@@ -78,13 +79,13 @@ int main(int argc, char** argv) {
     std::fprintf(stdout, "[bridge] plugin loaded, version=%s\n", bridge.version().c_str());
     std::fflush(stdout);
 
-    // Create the agent.
-    int ac = bridge.create_agent(cfg.log_dir);
+    std::string init_err;
+    int ac = bridge.init_agent(&init_err);
     if (ac != 0) {
-        std::fprintf(stderr, "[bridge] create_agent failed: %d\n", ac);
+        std::fprintf(stderr, "[bridge] init_agent failed: %d %s\n", ac, init_err.c_str());
         return 1;
     }
-    std::fprintf(stdout, "[bridge] agent created\n");
+    std::fprintf(stdout, "[bridge] agent ready, host=%s\n", bridge.get_host_for_login().c_str());
     std::fflush(stdout);
 
     // Start HTTP on a background thread (runs alongside stdio, if enabled).

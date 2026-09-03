@@ -2,6 +2,8 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <stdlib.h>
 
 #if defined(_WIN32)
 #  define WIN32_LEAN_AND_MEAN
@@ -9,6 +11,8 @@
 #else
 #  include <dlfcn.h>
 #  include <unistd.h>
+#  include <limits.h>
+#  include <stdlib.h>
 #endif
 
 namespace bambu {
@@ -33,7 +37,8 @@ PluginHandle& PluginHandle::operator=(PluginHandle&& o) noexcept {
 bool PluginHandle::load(const std::string& path, std::string* err) {
     unload();
 #if defined(_WIN32)
-    HMODULE h = ::LoadLibraryA(path.c_str());
+    HMODULE h = ::LoadLibraryExA(path.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
+    if (!h) h = ::LoadLibraryA(path.c_str());
     if (!h) {
         if (err) *err = "LoadLibrary failed for: " + path + " (error=" +
                          std::to_string(::GetLastError()) + ")";
@@ -43,8 +48,9 @@ bool PluginHandle::load(const std::string& path, std::string* err) {
 #else
     void* h = ::dlopen(path.c_str(), RTLD_LAZY | RTLD_GLOBAL);
     if (!h) {
+        const char* de = ::dlerror();
         if (err) *err = "dlopen failed for: " + path + " -> " +
-                         (::dlerror() ? ::dlerror() : "unknown error");
+                         (de ? de : "unknown error");
         return false;
     }
     handle_ = h;
@@ -98,19 +104,79 @@ std::string platform_library_name(const std::string& base, bool include_prefix) 
 static std::string join_path(const std::string& dir, const std::string& name) {
     if (dir.empty()) return name;
     if (dir.back() == '/' || dir.back() == '\\') return dir + name;
+#if defined(_WIN32)
+    return dir + "\\" + name;
+#else
     return dir + "/" + name;
+#endif
+}
+
+static std::string make_absolute(const std::string& p) {
+    if (p.empty()) return p;
+#if defined(_WIN32)
+    char buf[MAX_PATH] = {};
+    DWORD n = ::GetFullPathNameA(p.c_str(), MAX_PATH, buf, nullptr);
+    if (n > 0 && n < MAX_PATH) return std::string(buf);
+    return p;
+#else
+    char* r = ::realpath(p.c_str(), nullptr);
+    if (!r) return p;
+    std::string out(r);
+    ::free(r);
+    return out;
+#endif
+}
+
+void prepare_plugin_search_path(const std::string& dir) {
+    if (dir.empty()) return;
+    std::string abs = make_absolute(dir);
+#if defined(_WIN32)
+    ::SetDllDirectoryA(abs.c_str());
+#else
+    const char* old = ::getenv("LD_LIBRARY_PATH");
+    std::string next = abs;
+    if (old && *old) {
+        next.push_back(':');
+        next += old;
+    }
+    ::setenv("LD_LIBRARY_PATH", next.c_str(), 1);
+#endif
+}
+
+std::vector<PluginHandle> load_companion_plugins(const std::string& dir) {
+    std::string abs_dir = make_absolute(dir);
+    std::vector<PluginHandle> out;
+    const char* names[] = {
+#if defined(_WIN32)
+        "live555", "agora_rtc_sdk", "libaosl",
+        "libagora-ffmpeg", "libagora-soundtouch",
+#else
+        "live555", "agora_rtc_sdk", "agora-fdkaac",
+#endif
+    };
+    for (const char* n : names) {
+        PluginHandle h;
+        std::string p = join_path(abs_dir, platform_library_name(n, true));
+        if (!path_exists(p)) continue;
+        std::string err;
+        if (h.load(p, &err)) out.push_back(std::move(h));
+    }
+    return out;
 }
 
 PluginHandle load_network_plugin(const std::string& dir, std::string* out_error) {
+    std::string abs_dir = make_absolute(dir);
+    prepare_plugin_search_path(abs_dir);
     PluginHandle h;
     std::string err;
     std::vector<std::string> candidates;
     std::string pname = platform_library_name("bambu_networking", true);
-    candidates.push_back(join_path(dir, pname));                       // libbambu_networking.so / bamboo_networking.dll
-    candidates.push_back(join_path(dir, "bambu_networking"));          // literal base
-    candidates.push_back(join_path(dir, "libbambu_networking.so"));    // explicit linux name
-    candidates.push_back(join_path(dir, "bambu_networking.dll"));      // explicit windows name
-    if (!dir.empty()) candidates.push_back(dir);                        // treat dir itself as a file
+    candidates.push_back(join_path(abs_dir, pname));
+    candidates.push_back(join_path(abs_dir, "bambu_networking"));
+    candidates.push_back(join_path(abs_dir, "libbambu_networking.so"));
+    candidates.push_back(join_path(abs_dir, "bambu_networking.dll"));
+    if (!abs_dir.empty() && path_exists(abs_dir) && abs_dir.find('.') != std::string::npos)
+        candidates.push_back(abs_dir);
 
     for (const auto& c : candidates) {
         if (!path_exists(c)) continue;
@@ -127,11 +193,12 @@ PluginHandle load_network_plugin(const std::string& dir, std::string* out_error)
 }
 
 PluginHandle load_source_plugin(const std::string& dir, std::string* out_error) {
+    std::string abs_dir = make_absolute(dir);
     PluginHandle h;
     std::string err;
     std::string pname = platform_library_name("BambuSource", true);
-    for (const auto& c : {join_path(dir, pname),
-                          join_path(dir, "BambuSource"),}) {
+    for (const auto& c : {join_path(abs_dir, pname),
+                          join_path(abs_dir, "BambuSource"),}) {
         if (!path_exists(c)) continue;
         if (h.load(c, &err)) { if (out_error) out_error->clear(); return h; }
         if (out_error) *out_error = err;

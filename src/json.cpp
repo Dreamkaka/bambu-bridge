@@ -1,6 +1,7 @@
 #include "json.hpp"
 
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cmath>

@@ -24,7 +24,7 @@ mkdir -p "$(dirname "$OUT")"
 echo "[build] $CXX -std=$STD -> $OUT"
 "$CXX" -std="$STD" -O2 -Wall -Wextra \
     -Iinclude -Isrc \
-    -pthread \
+    -pthread -ldl \
     src/main.cpp \
     src/bridge.cpp \
     src/plugin_loader.cpp \

@@ -39,6 +39,7 @@ public:
 
     bool load(const std::string& path, std::string* err = nullptr);
     void unload();
+    void* raw() const { return handle_; }
 
     // Resolve a C symbol by name. Returns nullptr if not found.
     void* resolve(const std::string& name) const;
@@ -64,6 +65,13 @@ PluginHandle load_network_plugin(const std::string& dir, std::string* out_error)
 
 // Load the BambuSource companion module (same directory as the networking plugin).
 PluginHandle load_source_plugin(const std::string& dir, std::string* out_error);
+
+// Make companion libraries in `dir` resolvable (Windows DLL search path / Linux
+// preload of live555, BambuSource, agora, ...). Call before load_network_plugin.
+void prepare_plugin_search_path(const std::string& dir);
+
+// Load optional companion libraries so they stay mapped for the process lifetime.
+std::vector<PluginHandle> load_companion_plugins(const std::string& dir);
 
 } // namespace bambu
 

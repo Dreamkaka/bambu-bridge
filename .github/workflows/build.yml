@@ -26,7 +26,7 @@ jobs:
         run: |
           mkdir -p build
           g++ -std=c++17 -O2 -Wall -Wextra \
-              -Iinclude -Isrc -pthread \
+              -Iinclude -Isrc -pthread -ldl \
               src/main.cpp src/bridge.cpp src/plugin_loader.cpp src/json.cpp \
               src/rpc_handler.cpp src/stdio_transport.cpp src/http_server.cpp \
               -o build/bambu-bridge
@@ -35,7 +35,7 @@ jobs:
       - name: Build self-test
         run: |
           g++ -std=c++17 -O2 -Wall -Wextra \
-              -Iinclude -Isrc \
+              -Iinclude -Isrc -pthread -ldl \
               src/self_test.cpp src/bridge.cpp src/plugin_loader.cpp src/json.cpp \
               src/rpc_handler.cpp src/stdio_transport.cpp src/http_server.cpp \
               -o build/bambu-bridge-self-test

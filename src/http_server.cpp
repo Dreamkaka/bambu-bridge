@@ -240,6 +240,8 @@ void handle_conn(sock_t s) {
         std::string ver = g_bridge ? g_bridge->version() : "";
         r.set("version", Json::s(ver));
         r.set("loaded", Json::boolean(g_bridge && g_bridge->is_loaded()));
+        r.set("agent_ready", Json::boolean(g_bridge && g_bridge->agent_ready()));
+        r.set("logged_in", Json::boolean(g_bridge && g_bridge->is_user_login()));
         send_response(s, 200, "application/json", json_dump(r));
         close_sock(s);
         return;
@@ -284,8 +286,13 @@ void handle_conn(sock_t s) {
         prm.set("ticket", Json::s(ticket));
         req.set("params", prm);
         Json resp = handle_request(*g_bridge, req);
-        const Json* ok = resp.find("ok");
-        bool success = ok && ok->kind == Json::Bool && ok->b;
+        bool success = false;
+        if (const Json* ok = resp.find("ok"); ok && ok->kind == Json::Bool && ok->b) {
+            const Json* result = resp.find("result");
+            const Json* code = result ? result->find("code") : nullptr;
+            success = code && code->kind == Json::Number && code->num == 0.0;
+            if (!success && g_bridge) success = g_bridge->is_user_login();
+        }
         // Tell the /events SSE about the login result.
         if (g_bridge) {
             Json ev = Json::object();
@@ -362,7 +369,7 @@ bool start_http_server(BambuBridge& bridge, int port) {
     g_http_port = port;
     // Register a sink that broadcasts to SSE clients.
     static HttpEventSink sink;
-    bridge.set_event_sink(&sink);
+    bridge.add_event_sink(&sink);
 
     std::string err;
     g_listen = make_listen(port, &err);

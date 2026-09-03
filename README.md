@@ -114,7 +114,10 @@ cl /std:c++17 /O2 /Iinclude /Isrc ^
 | 方法/路径 | 说明 |
 |-----------|------|
 | `POST /rpc` | body：`{"method":"...","params":{...}}` → `{"ok":true,"result":...}` 或 `{"ok":false,"error":"..."}` |
-| `GET /health` | `{"ok":true,"version":"...","loaded":true}` |
+| `GET  /health` | `{"ok":true,"version":"...","loaded":true,"agent_ready":true,"logged_in":false}` |
+| `GET  /login` | 302 跳转到 Bambu 账号登录页 |
+| `GET  /login-url` | 返回登录 URL JSON |
+| `GET  /sign-in/callback` | OAuth ticket 回调，完成 `login_with_ticket` |
 | `GET /events` | SSE 事件流，推送插件异步事件（MQTT 消息、登录态、进度） |
 
 ### stdio JSON-RPC
@@ -127,29 +130,32 @@ cl /std:c++17 /O2 /Iinclude /Isrc ^
 
 ## 方法清单（`method` → 功能）
 
+进程启动时会自动 `init_agent()`（create → config/log/cert → 回调 → start → discovery）。RPC 一律返回 `{ok, result}`。
+
 ### 生命周期
-- `create_agent`、`destroy_agent`、`version`
-- `set_country_code`、`set_config_dir`、`set_cert_file`、`start`
+- `init_agent`、`create_agent`、`destroy_agent`、`version`、`status`
+- `set_country_code`、`set_config_dir`、`set_cert_file`、`init_log`、`start`
 
 ### 登录 / 云端连接
+- `login_with_ticket`、`change_user`
 - `connect_server`、`is_server_connected`、`refresh_connection`
 - `is_user_login`、`user_logout`
-- `get_user_id`、`get_user_name`、`get_user_avatar`
-- `get_bambulab_host`、`get_user_selected_machine`、`set_user_selected_machine`
-- `get_studio_info_url`
-- `get_my_token`、`get_my_profile`
+- `get_user_id`、`get_user_name`、`get_user_avatar`、`get_user_nickname`
+- `get_bambulab_host`、`get_login_url`、`get_user_selected_machine`、`set_user_selected_machine`
+- `get_studio_info_url`、`get_my_token`、`get_my_profile`
 
 ### 订阅 / MQTT（云端）
-- `add_subscribe`、`del_subscribe`
-- `send_message`（发 `device/<serial>/request` 等）
-- `send_message_to_printer`（向打印机发命令，插件会做签名）
+- `start_subscribe`、`stop_subscribe`、`add_subscribe`、`del_subscribe`
+- `send_message`（云端 MQTT）
+- `send_message_to_printer`（局域网，插件签名）
+- `printer_command`、`pushall`、`pause`、`resume`、`stop`
 
 ### 打印机
-- `connect_printer`、`disconnect_printer`
+- `connect_printer`、`disconnect_printer`、`start_discovery`、`install_device_cert`
 
 ### 云端读取 / 任务
-- `get_user_tasks`、`get_printer_firmware`、`get_slice_info`
-- `get_subtask_info`、`get_model_mall_detail_url`
+- `list_printers` / `get_user_print_info`、`get_user_tasks`、`get_printer_firmware`
+- `get_slice_info`、`get_subtask_info`、`get_camera_url`、`get_model_mall_detail_url`
 
 ### 打印
 - `start_print`、`start_local_print`
