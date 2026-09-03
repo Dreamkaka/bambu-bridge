@@ -190,7 +190,7 @@ POST /api/get_camera_url
 | `bambu:///local/{ip}.?port=6000&user=&passwd=` | `proto=local&ip=&password=` |
 | `bambu:///rtsps___user:pwd@ip/streaming/live/1` | `proto=rtsps` |
 | `wxMediaCtrl` / `gstbambusrc` 读 sample | `stream_camera_mpegts` 打成 TS |
-| `get_camera_url_for_golive`（BRTC） | **未封装** |
+| `get_camera_url_for_golive`（BRTC） | TUTK/Agora 都 disable 且 `brtc_service=enable` 时自动调用。若返回 `bambu:///`，与 TUTK 一样走 BambuSource → `/camera.ts`；若返回 `https://`/`webrtc://` 则无法封装成 TS |
 
 云端插件回调的 `bambu:///` 还会补 `&device=` `&net_ver=` `&dev_ver=`（与 Orca `MediaPlayCtrl` 一致）。`refresh_url`（Agora token 刷新函数指针）未接，Agora 长连接可能中途失效，可重开 `/camera.ts`。
 
@@ -225,7 +225,7 @@ POST /api/get_camera_url
 | `not logged in` | 先 `GET /login` |
 | `printer MQTT session not ready` | 机离线或未绑定；看 `list_printers` 的 `dev_online` |
 | `get_camera_url failed` / URL 不是 `bambu:///` | 云端换票失败；试加 `dev_ver`；看 `tutk_server` 是否 disable |
-| `error` 含 `403` | 云端摄像头 token 被拒。先 `pushall` 再打开 `/camera.ts`（自动带 OTA 版本）；或 `?dev_ver=xx.xx.xx.xx`；打印机开了「仅局域网预览」则用 `?ip=&password=&proto=local` |
+| `error` 含 `403` | TUTK/Agora 被拒。本机会自动再试 `get_camera_url_for_golive`（BRTC）。若 `ipcam.tutk_server=disable` 且 `agora_service=disable`、`brtc_service=enable`，云端是 WebRTC，**不能**走 `/camera.ts` MPEG-TS，请用 LAN `?ip=&password=&proto=local` |
 | VLC 打开 `bambu:///` 失败 | 必须用 `play_url` / `/camera.ts` |
 | LAN 无画面 | `proto` 与固件不符：有 RTSP 用 `rtsps`，否则 `local`；密码用 access code |
 | 浏览器不能播 | 用 mpegts.js 或改 VLC；原生 `<video src=.ts>` 不行 |

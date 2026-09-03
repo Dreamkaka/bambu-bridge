@@ -48,6 +48,7 @@ typedef int (*fn_Bambu_Create)(Bambu_Tunnel* tunnel, char const* path);
 typedef void (*fn_Bambu_SetLogger)(Bambu_Tunnel tunnel, Bambu_Logger logger, void* context);
 typedef int (*fn_Bambu_Open)(Bambu_Tunnel tunnel);
 typedef int (*fn_Bambu_StartStream)(Bambu_Tunnel tunnel, bool video);
+typedef int (*fn_Bambu_StartStreamEx)(Bambu_Tunnel tunnel, int type);
 typedef int (*fn_Bambu_GetStreamCount)(Bambu_Tunnel tunnel);
 typedef int (*fn_Bambu_GetStreamInfo)(Bambu_Tunnel tunnel, int index, Bambu_StreamInfo* info);
 typedef int (*fn_Bambu_ReadSample)(Bambu_Tunnel tunnel, Bambu_Sample* sample);

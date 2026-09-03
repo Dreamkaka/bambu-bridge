@@ -132,6 +132,7 @@ public:
     int  get_subtask_info(const std::string& subtask_id, std::string* task_json, std::string* http_body, unsigned* http_code);
     int  get_model_mall_detail_url(std::string* url, const std::string& id);
     int  get_camera_url(const std::string& dev_id, std::string* url);
+    int  get_camera_url_for_golive(const std::string& dev_id, const std::string& sdev_id, std::string* url);
     std::string plugin_dir() const { return plugin_dir_; }
 
     int  start_print(const Json& params_json, std::function<void(int, std::string)> update_cb,
@@ -274,6 +275,7 @@ private:
     func_get_subtask_info             fn_get_subtask_info             = nullptr;
     func_get_model_mall_detail_url    fn_get_model_mall_detail_url    = nullptr;
     func_get_camera_url               fn_get_camera_url               = nullptr;
+    func_get_camera_url_for_golive    fn_get_camera_url_for_golive    = nullptr;
     func_start_print                  fn_start_print                  = nullptr;
     func_start_local_print            fn_start_local_print            = nullptr;
 };

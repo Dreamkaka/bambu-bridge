@@ -380,6 +380,7 @@ void handle_conn(sock_t s) {
         std::string cam_err;
         if (!camera_source_ready())
             load_camera_source(g_bridge->plugin_dir(), &cam_err);
+        std::string cam_kind;
         std::string url = resolve_camera_url(*g_bridge, dev,
                                             url_query_param(query, "protocols"),
                                             url_query_param(query, "ip"),
@@ -387,11 +388,21 @@ void handle_conn(sock_t s) {
                                             url_query_param(query, "password"),
                                             url_query_param(query, "proto"),
                                             url_query_param(query, "dev_ver"),
-                                            &cam_err);
+                                            &cam_err, &cam_kind);
         if (url.empty()) {
             Json r = Json::object();
             r.set("ok", Json::boolean(false));
             r.set("error", Json::s(cam_err.empty() ? "resolve camera url failed" : cam_err));
+            send_response(s, 200, "application/json", json_dump(r));
+            close_sock(s);
+            return;
+        }
+        if (url.rfind("bambu:///", 0) != 0) {
+            Json r = Json::object();
+            r.set("ok", Json::boolean(true));
+            r.set("kind", Json::s(cam_kind.empty() ? "brtc" : cam_kind));
+            r.set("url", Json::s(url));
+            r.set("error", Json::s("cloud liveview is BRTC/WebRTC; this URL is not MPEG-TS. Use LAN proto=local or a WebRTC client"));
             send_response(s, 200, "application/json", json_dump(r));
             close_sock(s);
             return;

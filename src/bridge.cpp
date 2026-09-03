@@ -796,6 +796,36 @@ int BambuBridge::get_camera_url(const std::string& dev_id, std::string* url) {
     }
 }
 
+int BambuBridge::get_camera_url_for_golive(const std::string& dev_id, const std::string& sdev_id, std::string* url) {
+    if (!has_agent() || !fn_get_camera_url_for_golive) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
+    struct Wait {
+        std::mutex mu;
+        std::condition_variable cv;
+        bool done = false;
+        std::string out;
+    };
+    auto w = std::make_shared<Wait>();
+    int r = fn_get_camera_url_for_golive(agent_, dev_id, sdev_id, [w](std::string u) {
+        {
+            std::lock_guard<std::mutex> lk(w->mu);
+            w->out = std::move(u);
+            w->done = true;
+        }
+        w->cv.notify_all();
+    });
+    if (r != 0) {
+        if (url) *url = w->out;
+        return r;
+    }
+    std::unique_lock<std::mutex> lk(w->mu);
+    if (!w->cv.wait_for(lk, std::chrono::seconds(15), [&] { return w->done; })) {
+        if (url) *url = w->out;
+        return BAMBU_NETWORK_ERR_TIMEOUT;
+    }
+    if (url) *url = w->out;
+    return w->out.empty() ? BAMBU_NETWORK_ERR_INVALID_RESULT : BAMBU_NETWORK_SUCCESS;
+}
+
 int BambuBridge::start_print(const Json& params_json, std::function<void(int, std::string)> update_cb,
                              std::function<bool()> cancel_cb) {
     if (!has_agent() || !fn_start_print) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
@@ -1149,6 +1179,7 @@ bool BambuBridge::resolve_symbols(std::string* err) {
     fn_get_subtask_info             = load_sym<func_get_subtask_info>(S("bambu_network_get_subtask_info"));
     fn_get_model_mall_detail_url    = load_sym<func_get_model_mall_detail_url>(S("bambu_network_get_model_mall_detail_url"));
     fn_get_camera_url               = load_sym<func_get_camera_url>(S("bambu_network_get_camera_url"));
+    fn_get_camera_url_for_golive    = load_sym<func_get_camera_url_for_golive>(S("bambu_network_get_camera_url_for_golive"));
     fn_start_print                  = load_sym<func_start_print>(S("bambu_network_start_print"));
     fn_start_local_print            = load_sym<func_start_local_print>(S("bambu_network_start_local_print"));
 

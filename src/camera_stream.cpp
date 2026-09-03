@@ -29,6 +29,7 @@ fn_Bambu_Create            p_create = nullptr;
 fn_Bambu_SetLogger         p_set_logger = nullptr;
 fn_Bambu_Open              p_open = nullptr;
 fn_Bambu_StartStream       p_start = nullptr;
+fn_Bambu_StartStreamEx     p_start_ex = nullptr;
 fn_Bambu_GetStreamCount    p_count = nullptr;
 fn_Bambu_GetStreamInfo     p_info = nullptr;
 fn_Bambu_ReadSample        p_read = nullptr;
@@ -239,6 +240,7 @@ bool load_camera_source(const std::string& plugin_dir, std::string* err) {
     p_set_logger = load_sym<fn_Bambu_SetLogger>(S("Bambu_SetLogger"));
     p_open = load_sym<fn_Bambu_Open>(S("Bambu_Open"));
     p_start = load_sym<fn_Bambu_StartStream>(S("Bambu_StartStream"));
+    p_start_ex = load_sym<fn_Bambu_StartStreamEx>(S("Bambu_StartStreamEx"));
     p_count = load_sym<fn_Bambu_GetStreamCount>(S("Bambu_GetStreamCount"));
     p_info = load_sym<fn_Bambu_GetStreamInfo>(S("Bambu_GetStreamInfo"));
     p_read = load_sym<fn_Bambu_ReadSample>(S("Bambu_ReadSample"));
@@ -310,32 +312,32 @@ void collect_camera_protocols(const std::string& msg, const std::string& request
     };
     if (!requested.empty()) add(requested);
     Json j;
+    std::string tutk, agora, brtc, remote;
     if (!msg.empty() && json_parse(msg, &j)) {
         const Json* ipcam = find_ipcam(j);
-        std::string tutk;
-        std::string remote;
         if (ipcam) {
             if (const Json* t = ipcam->find("tutk_server"))
                 if (t->kind == Json::String) tutk = t->str;
+            if (const Json* a = ipcam->find("agora_service"))
+                if (a->kind == Json::String) agora = a->str;
+            if (const Json* b = ipcam->find("brtc_service"))
+                if (b->kind == Json::String) brtc = b->str;
             const Json* lv = ipcam->find("liveview");
             if (lv) {
                 if (const Json* r = lv->find("remote"))
                     if (r->kind == Json::String) remote = r->str;
             }
         }
-        if (tutk == "disable") {
-            add("\"agora\"");
-        } else if (remote == "agora") {
-            add("\"agora\"");
-        } else if (remote == "tutk") {
-            add("\"tutk\"");
-        } else if (remote == "tutk_agaro" || remote == "tutk_agora") {
-            add("\"tutk\",\"agora\"");
-        }
     }
+    if (brtc == "enable" || (tutk == "disable" && agora == "disable"))
+        add("brtc");
+    if (agora != "disable" && remote == "agora") add("\"agora\"");
+    if (tutk != "disable" && remote == "tutk") add("\"tutk\"");
+    if (tutk != "disable" && agora != "disable") add("\"tutk\",\"agora\"");
+    if (agora != "disable") add("\"agora\"");
+    if (tutk != "disable") add("\"tutk\"");
+    add("brtc");
     add("\"tutk\",\"agora\"");
-    add("\"agora\"");
-    add("\"tutk\"");
 }
 
 std::string resolve_ota_version(BambuBridge& bridge, const std::string& dev_id, const std::string& given) {
@@ -356,8 +358,10 @@ std::string resolve_camera_url(BambuBridge& bridge, const std::string& dev_id,
                                const std::string& protocols, const std::string& lan_ip,
                                const std::string& lan_user, const std::string& lan_passwd,
                                const std::string& lan_proto, const std::string& dev_ver,
-                               std::string* err) {
+                               std::string* err, std::string* kind) {
+    if (kind) kind->clear();
     if (!lan_ip.empty()) {
+        if (kind) *kind = "lan";
         return build_lan_camera_url(lan_ip, lan_user.empty() ? "bblp" : lan_user,
                                     lan_passwd, lan_proto.empty() ? "local" : lan_proto,
                                      dev_id, bridge.client_version(), dev_ver);
@@ -374,25 +378,40 @@ std::string resolve_camera_url(BambuBridge& bridge, const std::string& dev_id,
     std::vector<std::string> tries;
     collect_camera_protocols(bridge.last_printer_msg(dev_id), protocols, tries);
     std::string url, last_raw, last_key;
+    auto finish_bambu = [&](std::string u, const char* knd) {
+        u += "&device=" + dev_id;
+        u += "&net_ver=" + bridge.client_version();
+        if (!ver.empty()) u += "&dev_ver=" + ver;
+        if (kind) *kind = knd;
+        return u;
+    };
     for (const auto& proto : tries) {
-        last_key = dev_id + "|" + ver + "|" + proto;
         url.clear();
-        int r = bridge.get_camera_url(last_key, &url);
-        if (r == 0 && !url.empty() && url.rfind("bambu:///", 0) == 0) {
-            url += "&device=" + dev_id;
-            url += "&net_ver=" + bridge.client_version();
-            if (!ver.empty()) url += "&dev_ver=" + ver;
-            return url;
+        int r = 0;
+        if (proto == "brtc") {
+            last_key = "golive:" + dev_id;
+            r = bridge.get_camera_url_for_golive(dev_id, "", &url);
+        } else {
+            last_key = dev_id + "|" + ver + "|" + proto;
+            r = bridge.get_camera_url(last_key, &url);
+        }
+        if (r == 0 && !url.empty()) {
+            if (url.rfind("bambu:///", 0) == 0)
+                return finish_bambu(url, proto == "brtc" ? "brtc" : "cloud");
+            if (proto == "brtc") {
+                if (kind) *kind = "brtc";
+                return url;
+            }
         }
         last_raw = url.empty() ? ("code=" + std::to_string(r)) : url;
-        if (last_raw.find("403") == std::string::npos && r == 0) break;
     }
     if (err) {
         *err = "get_camera_url failed: " + last_raw
             + " (key=" + last_key + ")";
         if (last_raw.find("403") != std::string::npos)
-            *err += " cloud 403: printer may have LAN-only liveview (tutk disabled). "
-                    "Use /camera.ts?dev_id=&ip=&password=&proto=local";
+            *err += " TUTK/Agora 403 and BRTC golive also failed. "
+                    "This printer has tutk/agora disabled; try LAN "
+                    "/camera.ts?dev_id=&ip=&password=&proto=local";
     }
     return {};
 }
@@ -419,6 +438,13 @@ int stream_camera_mpegts(const std::string& bambu_url, const std::atomic<bool>& 
     while ((rv = p_start(tnl, true)) == Bambu_would_block && running) {
         sleep_ms(100);
         if (++tries > 100) break;
+    }
+    if (rv != Bambu_success && p_start_ex) {
+        tries = 0;
+        while ((rv = p_start_ex(tnl, 1)) == Bambu_would_block && running) {
+            sleep_ms(100);
+            if (++tries > 100) break;
+        }
     }
     if (rv != Bambu_success) {
         if (err) *err = "Bambu_StartStream failed: " + std::to_string(rv);

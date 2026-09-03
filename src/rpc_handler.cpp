@@ -420,25 +420,27 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
             return resp_ok(res);
         }
         if (m == "get_camera_url") {
-            std::string err;
+            std::string err, kind;
             std::string url = resolve_camera_url(bridge, str_param(p, "dev_id"),
-                                                 str_param(p, "protocols", "\"tutk\",\"agora\""),
+                                                 str_param(p, "protocols"),
                                                  str_param(p, "ip"),
                                                  str_param(p, "user", "bblp"),
                                                  str_param(p, "password"),
                                                  str_param(p, "proto"),
                                                  str_param(p, "dev_ver"),
-                                                 &err);
+                                                 &err, &kind);
             Json res = Json::object();
             res.set("code", Json::n(url.empty() ? -1.0 : 0.0));
             res.set("url", Json::s(url));
+            res.set("kind", Json::s(kind));
             if (http_listen_port() > 0 && !str_param(p, "dev_id").empty()) {
                 std::string play = "http://127.0.0.1:" + std::to_string(http_listen_port())
                     + "/camera.ts?dev_id=" + str_param(p, "dev_id");
                 if (!str_param(p, "ip").empty()) play += "&ip=" + str_param(p, "ip");
                 if (!str_param(p, "password").empty()) play += "&password=" + str_param(p, "password");
                 if (!str_param(p, "proto").empty()) play += "&proto=" + str_param(p, "proto");
-                res.set("play_url", Json::s(play));
+                if (kind != "brtc" || url.rfind("bambu:///", 0) == 0)
+                    res.set("play_url", Json::s(play));
             }
             if (url.empty()) res.set("error", Json::s(err));
             return resp_ok(res);

@@ -33,7 +33,7 @@ std::string resolve_camera_url(BambuBridge& bridge, const std::string& dev_id,
                                const std::string& protocols, const std::string& lan_ip,
                                const std::string& lan_user, const std::string& lan_passwd,
                                const std::string& lan_proto, const std::string& dev_ver,
-                               std::string* err);
+                               std::string* err, std::string* kind = nullptr);
 
 using ByteSink = std::function<bool(const unsigned char* data, size_t n)>;
 
