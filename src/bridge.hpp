@@ -150,7 +150,8 @@ public:
         std::string msg;
         std::string error;
     };
-    int  ensure_cloud_ready(const std::string& dev_id, int timeout_ms = 10000, std::string* err = nullptr);
+    int  ensure_cloud_ready(const std::string& dev_id, int timeout_ms = 10000, std::string* err = nullptr,
+                            bool force = false);
     CommandWait printer_command_wait(const std::string& dev_id, const std::string& json_str, bool lan,
                                      int timeout_ms = 8000, int qos = 0, int flag = 0);
     std::string last_printer_msg(const std::string& dev_id) const;
@@ -178,6 +179,8 @@ private:
     void note_printer_msg(const std::string& dev_id, const std::string& source, const std::string& msg);
     static std::string parse_printer_id(const std::string& topic);
     void mark_printer_mqtt(const std::string& dev_id);
+    void unmark_printer_mqtt(const std::string& dev_id);
+    int  wait_printer_mqtt(const std::string& dev_id, int timeout_ms);
 
     PluginHandle net_, src_;
     std::vector<PluginHandle> companions_;

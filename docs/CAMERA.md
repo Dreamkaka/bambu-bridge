@@ -33,6 +33,20 @@ VLC / ffplay / 浏览器 mpegts.js
 - **云端**：已登录；打开 `/camera.ts` 时会自动 `add_subscribe` + 选中该机  
 - **局域网**：要知道 IP 和 access code（`list_printers` 的 `dev_access_code`，或打印机屏幕）
 
+## OrcaSlicer 实际怎么播
+
+预览只走 `MediaPlayCtrl`，**不用** `get_camera_url_for_golive`。
+
+1. 看 `ipcam.liveview.local` / `remote`、`tutk_server`、`rtsp_url`  
+2. **能 LAN 就 LAN**：`bambu:///local/{ip}.?port=6000&user=bblp&passwd=` 或 `rtsps___` / `rtsp___`  
+3. 否则云端：`get_camera_url(serial + "|" + ota_ver + "|" + "\"tutk\"" 或 agora)`  
+4. 回调必须 `starts_with("bambu:///")` 才 `load()`；否则从 `...[403]` 里抠错误码，提示失败  
+5. `bambu:///` 交给 `BambuSource`（wxMediaCtrl / gstbambusrc）读 H264  
+
+`get_camera_url_for_golive` 在 Orca 预览里**没有调用**。`brtc_service` 在切片机里主要表示 TCP/上传能力，不是这路直播。
+
+插件失败时回调经常是 `" [403]"` 这种字符串，**不是 URL**。只有 `bambu:///` 才算成功。
+
 `pushall` 的 `payload.ipcam` 可判断能力：
 
 | 字段 | 含义 |
@@ -42,6 +56,8 @@ VLC / ffplay / 浏览器 mpegts.js
 | `ipcam.liveview.local` | `local` / `rtsps` / `rtsp` / `disabled` / `none` |
 | `ipcam.rtsp_url` | 若为 `rtsps://...` 可试 VLC 直连，不必走 bridge |
 | `ipcam.tutk_server` | `disable` 时云端 TUTK 不可用 |
+| `ipcam.agora_service` | `disable` 时 Agora 不可用 |
+| `ipcam.brtc_service` | `enable` 不代表 TUTK 能换票；Orca 预览仍走 TUTK/LAN |
 
 ---
 

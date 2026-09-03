@@ -12,7 +12,7 @@ POST /api/<name>
 
 stdio：一行一个 `{"method":"...","params":{...}}`。
 
-摄像头拉流（`/camera.ts`、LAN/云端、VLC）见 **[CAMERA.md](CAMERA.md)**。
+摄像头拉流（`/camera.ts`、LAN/云端、VLC）见 **[CAMERA.md](CAMERA.md)**。AMS 编号、状态字段、换料 / RFID / 烘干见 **[AMS.md](AMS.md)**。
 
 ---
 
@@ -435,6 +435,8 @@ curl -s -X POST http://127.0.0.1:8080/api/pushall \
 
 ### 6.5 AMS
 
+完整编号、状态字段、未封装命令见 **[AMS.md](AMS.md)**。这里只列已封装 method。
+
 #### `ams_control`
 
 | 参数 | 类型 | 默认 |
@@ -584,29 +586,7 @@ LAN 连接结果在 SSE `on_local_connect`：`status=0` 成功，`msg=="5"` 密�
 
 ### AMS 扩展
 
-读 RFID：
-
-```json
-{"print":{"command":"ams_get_rfid","ams_id":0,"slot_id":0,"sequence_id":"1"}}
-```
-
-槽位耗材信息：
-
-```json
-{
-  "print": {
-    "command": "ams_filament_setting",
-    "ams_id": 0, "slot_id": 0, "tray_id": 0,
-    "tray_info_idx": "GFA00", "setting_id": "...",
-    "tray_color": "FFFFFFFF", "tray_type": "PLA",
-    "nozzle_temp_min": 190, "nozzle_temp_max": 230,
-    "sequence_id": "1"
-  }
-}
-```
-
-停止烘干：`{"print":{"command":"ams_drying_stop","sequence_id":"1"}}`  
-RFID 刷新 G-code：`M620 R<slot>\n`；选槽：`M620 P<tray>\n`；校准：`M620 C<ams_id>\n`。
+RFID / 槽位耗材 / 烘干 / `M620` 的完整 JSON 见 **[AMS.md](AMS.md)**。停止烘干用 `auto_stop_ams_dry`（不是 `ams_drying_stop`）。
 
 ### 升级 / 错误 / 蜂鸣器
 

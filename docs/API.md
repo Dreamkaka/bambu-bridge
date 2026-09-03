@@ -8,7 +8,7 @@
 
 调用方**不要**再手动走一遍这套生命周期，除非你在做热重启。
 
-全部 RPC 方法与参数见 **[RPC.md](RPC.md)**。摄像头 / MPEG-TS 见 **[CAMERA.md](CAMERA.md)**。
+全部 RPC 方法与参数见 **[RPC.md](RPC.md)**。摄像头 / MPEG-TS 见 **[CAMERA.md](CAMERA.md)**。AMS 见 **[AMS.md](AMS.md)**。
 
 ---
 
@@ -677,7 +677,7 @@ curl -s -X POST http://127.0.0.1:8080/api/pushall \
 
 `command` 分别为 `pause` / `resume` / `stop`。
 
-完整打印机控制参数（温度 / 风扇 / 灯光 / AMS / G-code 等）见 **[RPC.md](RPC.md)**。未单独封装的命令用 `send_message` 传 `json_str`。
+完整打印机控制参数（温度 / 风扇 / 灯光 / AMS / G-code 等）见 **[RPC.md](RPC.md)**。AMS 编号与换料见 **[AMS.md](AMS.md)**。未单独封装的命令用 `send_message` 传 `json_str`。
 
 ---
 

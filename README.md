@@ -2,7 +2,7 @@
 
 把 Bambu 官方闭源网络插件（`bambu_networking.dll` / `libbambu_networking.so`）封装成**一个独立进程**，对外暴露 **HTTP/REST JSON** 和 **stdio JSON-RPC** 两种接口，供其他应用或 agent 调用。这样第三方程序无需直接处理 C++ ABI / MQTT 签名 / 视频流协商，只需发 JSON。
 
-完整接口见 **[docs/API.md](docs/API.md)**，RPC 参数见 **[docs/RPC.md](docs/RPC.md)**，摄像头见 **[docs/CAMERA.md](docs/CAMERA.md)**。
+完整接口见 **[docs/API.md](docs/API.md)**，RPC 参数见 **[docs/RPC.md](docs/RPC.md)**，摄像头见 **[docs/CAMERA.md](docs/CAMERA.md)**，AMS 见 **[docs/AMS.md](docs/AMS.md)**。
 
 ```
  [agent / 应用 / LLM]

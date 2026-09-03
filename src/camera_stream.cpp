@@ -395,13 +395,14 @@ std::string resolve_camera_url(BambuBridge& bridge, const std::string& dev_id,
             last_key = dev_id + "|" + ver + "|" + proto;
             r = bridge.get_camera_url(last_key, &url);
         }
-        if (r == 0 && !url.empty()) {
-            if (url.rfind("bambu:///", 0) == 0)
-                return finish_bambu(url, proto == "brtc" ? "brtc" : "cloud");
-            if (proto == "brtc") {
-                if (kind) *kind = "brtc";
-                return url;
-            }
+        auto ok_bambu = !url.empty() && url.rfind("bambu:///", 0) == 0;
+        auto looks_err = url.find("[") != std::string::npos && url.find("]") != std::string::npos
+                         && url.find("://") == std::string::npos;
+        if (r == 0 && ok_bambu)
+            return finish_bambu(url, proto == "brtc" ? "brtc" : "cloud");
+        if (r == 0 && proto == "brtc" && !url.empty() && !looks_err && url.find("://") != std::string::npos) {
+            if (kind) *kind = "brtc";
+            return url;
         }
         last_raw = url.empty() ? ("code=" + std::to_string(r)) : url;
     }
