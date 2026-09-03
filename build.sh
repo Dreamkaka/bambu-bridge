@@ -32,6 +32,7 @@ echo "[build] $CXX -std=$STD -> $OUT"
     src/rpc_handler.cpp \
     src/stdio_transport.cpp \
     src/http_server.cpp \
+    src/camera_stream.cpp \
     -o "$OUT"
 
 echo "[build] OK: $OUT"

@@ -28,6 +28,7 @@ add_executable(bambu-bridge
     src/rpc_handler.cpp
     src/stdio_transport.cpp
     src/http_server.cpp
+    src/camera_stream.cpp
 )
 
 target_include_directories(bambu-bridge PRIVATE include src)
@@ -52,6 +53,7 @@ add_executable(bambu-bridge-self-test
     src/rpc_handler.cpp
     src/stdio_transport.cpp
     src/http_server.cpp
+    src/camera_stream.cpp
 )
 target_include_directories(bambu-bridge-self-test PRIVATE include src)
 if(WIN32)

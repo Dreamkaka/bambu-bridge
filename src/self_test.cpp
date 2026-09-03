@@ -108,6 +108,20 @@ static void test_rpc_wrapped_response() {
     CHECK(lok && lok->kind == Json::Bool && lok->b == true, "is_user_login -> ok:true");
     const Json* lres = lresp.find("result");
     CHECK(lres && lres->kind == Json::Bool && lres->b == false, "unloaded is_user_login is false");
+
+    Json push = Json::object();
+    push.set("method", Json::s("pushall"));
+    Json pp = Json::object();
+    pp.set("dev_id", Json::s("x"));
+    pp.set("wait", Json::boolean(false));
+    push.set("params", pp);
+    Json presp = handle_request(bridge, push);
+    const Json* pok = presp.find("ok");
+    CHECK(pok && pok->kind == Json::Bool && pok->b == true, "pushall wait=false still ok");
+    const Json* pres = presp.find("result");
+    CHECK(pres && pres->kind == Json::Object, "pushall result is object");
+    const Json* pcode = pres ? pres->find("code") : nullptr;
+    CHECK(pcode && pcode->kind == Json::Number, "pushall result.code is number");
 }
 
 static void test_bridge_safe_calls() {

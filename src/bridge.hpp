@@ -129,6 +129,7 @@ public:
     int  get_subtask_info(const std::string& subtask_id, std::string* task_json, std::string* http_body, unsigned* http_code);
     int  get_model_mall_detail_url(std::string* url, const std::string& id);
     int  get_camera_url(const std::string& dev_id, std::string* url);
+    std::string plugin_dir() const { return plugin_dir_; }
 
     int  start_print(const Json& params_json, std::function<void(int, std::string)> update_cb,
                      std::function<bool()> cancel_cb);
@@ -136,6 +137,17 @@ public:
                            std::function<bool()> cancel_cb);
 
     int  printer_command(const std::string& dev_id, const std::string& json_str, bool lan, int qos = 0, int flag = 0);
+
+    struct CommandWait {
+        int code = BAMBU_NETWORK_ERR_TIMEOUT;
+        bool timed_out = true;
+        std::string dev_id;
+        std::string source;
+        std::string msg;
+    };
+    CommandWait printer_command_wait(const std::string& dev_id, const std::string& json_str, bool lan,
+                                     int timeout_ms = 8000, int qos = 0, int flag = 0);
+    std::string last_printer_msg(const std::string& dev_id) const;
 
     void set_event_sink(EventSink* s);
     void add_event_sink(EventSink* s);
@@ -155,6 +167,7 @@ private:
     void apply_studio_http_headers();
     std::string find_cert_folder() const;
     int  after_login();
+    void note_printer_msg(const std::string& dev_id, const std::string& source, const std::string& msg);
 
     PluginHandle net_, src_;
     std::vector<PluginHandle> companions_;
@@ -176,6 +189,17 @@ private:
     std::queue<std::function<void()>> dispatch_q_;
     std::thread dispatch_thread_;
     std::atomic<bool> dispatch_running_{false};
+
+    struct PendingWait {
+        std::string dev_id;
+        std::condition_variable cv;
+        bool done = false;
+        std::string source;
+        std::string msg;
+    };
+    mutable std::mutex wait_mtx_;
+    std::vector<std::shared_ptr<PendingWait>> pending_waits_;
+    std::map<std::string, std::pair<std::string, std::string>> last_msg_;
 
     func_check_debug_consistent       fn_check_debug_consistent       = nullptr;
     func_get_version                  fn_get_version                  = nullptr;

@@ -58,8 +58,9 @@ if __name__ == "__main__":
         print("using:", serial, devices[0].get("dev_name"))
         print("add_subscribe:", rpc("add_subscribe", {"dev_list": [serial]}))
         print("set_user_selected_machine:", rpc("set_user_selected_machine", {"dev_id": serial}))
-        print("pushall:", rpc("pushall", {"dev_id": serial}))
-        print("pause:", rpc("pause", {"dev_id": serial}))
+        push = rpc("pushall", {"dev_id": serial}, timeout=20.0)
+        print("pushall payload:", (push.get("result") or {}).get("payload"))
+        print("pause:", rpc("pause", {"dev_id": serial}, timeout=20.0))
     except Exception as e:
         print("ERROR:", e)
         sys.exit(1)

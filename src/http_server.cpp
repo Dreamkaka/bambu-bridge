@@ -1,6 +1,7 @@
 #include "http_server.hpp"
 #include "rpc_handler.hpp"
 #include "json.hpp"
+#include "camera_stream.hpp"
 
 #include <cstdio>
 #include <cstring>
@@ -323,6 +324,98 @@ void handle_conn(sock_t s) {
         }
         Json resp = handle_request(*g_bridge, req);
         send_response(s, 200, "application/json", json_dump(resp));
+        close_sock(s);
+        return;
+    }
+
+    if (method == "POST" && path.rfind("/api/", 0) == 0 && g_bridge) {
+        std::string rpc_method = path.substr(5);
+        Json req = Json::object();
+        req.set("method", Json::s(rpc_method));
+        Json params;
+        if (body.empty()) params = Json::object();
+        else if (!json_parse(body, &params)) {
+            Json r = Json::object();
+            r.set("ok", Json::boolean(false));
+            r.set("error", Json::s("bad JSON body"));
+            send_response(s, 200, "application/json", json_dump(r));
+            close_sock(s);
+            return;
+        }
+        if (params.kind != Json::Object) params = Json::object();
+        std::string qdev = url_query_param(query, "dev_id");
+        if (!qdev.empty() && !params.find("dev_id")) params.set("dev_id", Json::s(qdev));
+        req.set("params", params);
+        Json resp = handle_request(*g_bridge, req);
+        send_response(s, 200, "application/json", json_dump(resp));
+        close_sock(s);
+        return;
+    }
+
+    if (path == "/camera.html" && method == "GET") {
+        std::string html =
+            "<!doctype html><meta charset=utf-8><title>bambu camera</title>"
+            "<style>body{font-family:sans-serif;margin:24px;background:#111;color:#eee}video{width:100%;max-width:960px;background:#000}</style>"
+            "<h2>printer camera</h2><p>needs <a href=https://github.com/video-dev/mpegts.js>mpegts.js</a> in browser, or open the ts URL in VLC.</p>"
+            "<video id=v controls autoplay muted></video>"
+            "<script src=https://cdn.jsdelivr.net/npm/mpegts.js@1.7.3/dist/mpegts.min.js></script>"
+            "<script>const q=location.search||('?dev_id='+prompt('dev_id'));"
+            "const url='/camera.ts'+q;"
+            "if(mpegts.isSupported()){const p=mpegts.createPlayer({type:'mse',isLive:true,url:url});p.attachMediaElement(document.getElementById('v'));p.load();p.play();}"
+            "else{document.body.insertAdjacentHTML('beforeend','<p>open in VLC: '+location.origin+url+'</p>');}</script>";
+        send_response(s, 200, "text/html; charset=utf-8", html);
+        close_sock(s);
+        return;
+    }
+
+    if ((path == "/camera.ts" || path == "/camera") && method == "GET" && g_bridge) {
+        std::string dev = url_query_param(query, "dev_id");
+        if (dev.empty()) {
+            send_response(s, 200, "application/json",
+                          "{\"ok\":false,\"error\":\"missing dev_id\"}");
+            close_sock(s);
+            return;
+        }
+        std::string cam_err;
+        if (!camera_source_ready())
+            load_camera_source(g_bridge->plugin_dir(), &cam_err);
+        std::string url = resolve_camera_url(*g_bridge, dev,
+                                            url_query_param(query, "protocols"),
+                                            url_query_param(query, "ip"),
+                                            url_query_param(query, "user"),
+                                            url_query_param(query, "password"),
+                                            url_query_param(query, "proto"),
+                                            url_query_param(query, "dev_ver"),
+                                            &cam_err);
+        if (url.empty()) {
+            Json r = Json::object();
+            r.set("ok", Json::boolean(false));
+            r.set("error", Json::s(cam_err.empty() ? "resolve camera url failed" : cam_err));
+            send_response(s, 200, "application/json", json_dump(r));
+            close_sock(s);
+            return;
+        }
+        std::string hdr =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: video/mp2t\r\n"
+            "Cache-Control: no-cache, no-store\r\n"
+            "Connection: close\r\n"
+            "Access-Control-Allow-Origin: *\r\n\r\n";
+        send_all(s, hdr);
+        std::atomic<bool> run{true};
+        stream_camera_mpegts(url, run, [s](const unsigned char* d, size_t n) {
+            size_t off = 0;
+            while (off < n) {
+#if defined(_WIN32)
+                int w = ::send((SOCKET)s, (const char*)d + off, (int)(n - off), 0);
+#else
+                int w = ::send((int)s, (const char*)d + off, (int)(n - off), 0);
+#endif
+                if (w <= 0) return false;
+                off += (size_t)w;
+            }
+            return true;
+        }, &cam_err);
         close_sock(s);
         return;
     }

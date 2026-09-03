@@ -1,6 +1,8 @@
 #include "bridge.hpp"
 #include "json.hpp"
+#include "camera_stream.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <cctype>
@@ -210,6 +212,10 @@ bool BambuBridge::load_plugin(const AgentConfig& cfg, std::string* err_) {
 
     prepare_plugin_search_path(plugin_dir_);
     companions_ = load_companion_plugins(plugin_dir_);
+    {
+        std::string cam_err;
+        load_camera_source(plugin_dir_, &cam_err);
+    }
     net_ = load_network_plugin(plugin_dir_, err_);
     if (!net_.is_loaded()) return false;
     src_ = load_source_plugin(plugin_dir_, nullptr);
@@ -533,6 +539,57 @@ int BambuBridge::printer_command(const std::string& dev_id, const std::string& j
                : send_message(dev_id, json_str, qos, flag);
 }
 
+void BambuBridge::note_printer_msg(const std::string& dev_id, const std::string& source, const std::string& msg) {
+    std::lock_guard<std::mutex> lk(wait_mtx_);
+    last_msg_[dev_id] = {source, msg};
+    for (auto& w : pending_waits_) {
+        if (!w || w->done) continue;
+        if (!w->dev_id.empty() && w->dev_id != dev_id) continue;
+        w->source = source;
+        w->msg = msg;
+        w->done = true;
+        w->cv.notify_all();
+    }
+}
+
+std::string BambuBridge::last_printer_msg(const std::string& dev_id) const {
+    std::lock_guard<std::mutex> lk(wait_mtx_);
+    auto it = last_msg_.find(dev_id);
+    if (it == last_msg_.end()) return {};
+    return it->second.second;
+}
+
+BambuBridge::CommandWait BambuBridge::printer_command_wait(const std::string& dev_id, const std::string& json_str,
+                                                           bool lan, int timeout_ms, int qos, int flag) {
+    CommandWait out;
+    out.dev_id = dev_id;
+    auto waiter = std::make_shared<PendingWait>();
+    waiter->dev_id = dev_id;
+    {
+        std::lock_guard<std::mutex> lk(wait_mtx_);
+        pending_waits_.push_back(waiter);
+    }
+    out.code = printer_command(dev_id, json_str, lan, qos, flag);
+    if (out.code != BAMBU_NETWORK_SUCCESS) {
+        std::lock_guard<std::mutex> lk(wait_mtx_);
+        pending_waits_.erase(std::remove(pending_waits_.begin(), pending_waits_.end(), waiter), pending_waits_.end());
+        out.timed_out = false;
+        return out;
+    }
+    if (timeout_ms <= 0) timeout_ms = 8000;
+    {
+        std::unique_lock<std::mutex> lk(wait_mtx_);
+        out.timed_out = !waiter->cv.wait_for(lk, std::chrono::milliseconds(timeout_ms), [&] { return waiter->done; });
+        out.source = waiter->source;
+        out.msg = waiter->msg;
+        pending_waits_.erase(std::remove(pending_waits_.begin(), pending_waits_.end(), waiter), pending_waits_.end());
+    }
+    if (!out.timed_out && out.code == BAMBU_NETWORK_SUCCESS && out.msg.empty()) {
+        out.msg = last_printer_msg(dev_id);
+    }
+    return out;
+}
+
 int BambuBridge::connect_printer(const std::string& dev_id, const std::string& dev_ip,
                                  const std::string& username, const std::string& password, bool use_ssl) {
     if (!has_agent() || !fn_connect_printer) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
@@ -590,10 +647,34 @@ int BambuBridge::get_model_mall_detail_url(std::string* url, const std::string& 
 }
 int BambuBridge::get_camera_url(const std::string& dev_id, std::string* url) {
     if (!has_agent() || !fn_get_camera_url) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
-    std::string out;
-    int r = fn_get_camera_url(agent_, dev_id, [&](std::string u) { out = std::move(u); });
-    if (url) *url = out;
-    return r;
+    struct Wait {
+        std::mutex mu;
+        std::condition_variable cv;
+        bool done = false;
+        std::string out;
+    };
+    auto w = std::make_shared<Wait>();
+    int r = fn_get_camera_url(agent_, dev_id, [w](std::string u) {
+        {
+            std::lock_guard<std::mutex> lk(w->mu);
+            w->out = std::move(u);
+            w->done = true;
+        }
+        w->cv.notify_all();
+    });
+    if (r != 0) {
+        if (url) *url = w->out;
+        return r;
+    }
+    {
+        std::unique_lock<std::mutex> lk(w->mu);
+        if (!w->cv.wait_for(lk, std::chrono::seconds(15), [&] { return w->done; })) {
+            if (url) *url = w->out;
+            return BAMBU_NETWORK_ERR_TIMEOUT;
+        }
+        if (url) *url = w->out;
+        return w->out.empty() ? BAMBU_NETWORK_ERR_INVALID_RESULT : BAMBU_NETWORK_SUCCESS;
+    }
 }
 
 int BambuBridge::start_print(const Json& params_json, std::function<void(int, std::string)> update_cb,
@@ -774,6 +855,7 @@ void BambuBridge::install_callbacks() {
             ev.set("dev_id", Json::s(dev_id));
             ev.set("msg", Json::s(msg));
             ev.set("source", Json::s("cloud"));
+            note_printer_msg(dev_id, "cloud", msg);
             emit("on_message", ev);
         });
     }
@@ -810,6 +892,7 @@ void BambuBridge::install_callbacks() {
             ev.set("dev_id", Json::s(dev_id));
             ev.set("msg", Json::s(msg));
             ev.set("source", Json::s("lan"));
+            note_printer_msg(dev_id, "lan", msg);
             emit("on_local_message", ev);
         });
     }

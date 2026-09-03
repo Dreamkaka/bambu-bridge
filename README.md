@@ -2,6 +2,8 @@
 
 把 Bambu 官方闭源网络插件（`bambu_networking.dll` / `libbambu_networking.so`）封装成**一个独立进程**，对外暴露 **HTTP/REST JSON** 和 **stdio JSON-RPC** 两种接口，供其他应用或 agent 调用。这样第三方程序无需直接处理 C++ ABI / MQTT 签名 / 视频流协商，只需发 JSON。
 
+完整接口见 **[docs/API.md](docs/API.md)**，全部 RPC 参数见 **[docs/RPC.md](docs/RPC.md)**。
+
 ```
  [agent / 应用 / LLM]
         │  HTTP JSON 或 stdio JSON-RPC
@@ -107,6 +109,8 @@ cl /std:c++17 /O2 /Iinclude /Isrc ^
 
 ---
 
+完整字段、返回值、事件 payload、登录与控制顺序见 [docs/API.md](docs/API.md)。
+
 ## 协议
 
 ### HTTP 端点
@@ -114,11 +118,14 @@ cl /std:c++17 /O2 /Iinclude /Isrc ^
 | 方法/路径 | 说明 |
 |-----------|------|
 | `POST /rpc` | body：`{"method":"...","params":{...}}` → `{"ok":true,"result":...}` 或 `{"ok":false,"error":"..."}` |
+| `POST /api/<method>` | REST 简写，body 即 params。`pushall`/`pause` 等默认等待打印机 `payload` 后返回 |
 | `GET  /health` | `{"ok":true,"version":"...","loaded":true,"agent_ready":true,"logged_in":false}` |
 | `GET  /login` | 302 跳转到 Bambu 账号登录页 |
 | `GET  /login-url` | 返回登录 URL JSON |
 | `GET  /sign-in/callback` | OAuth ticket 回调，完成 `login_with_ticket` |
 | `GET /events` | SSE 事件流，推送插件异步事件（MQTT 消息、登录态、进度） |
+| `GET /camera.ts?dev_id=` | BambuSource 转 MPEG-TS 直播，VLC / ffmpeg / mpegts.js 可播 |
+| `GET /camera.html?dev_id=` | 浏览器预览页 |
 
 ### stdio JSON-RPC
 

@@ -28,7 +28,7 @@ jobs:
           g++ -std=c++17 -O2 -Wall -Wextra \
               -Iinclude -Isrc -pthread -ldl \
               src/main.cpp src/bridge.cpp src/plugin_loader.cpp src/json.cpp \
-              src/rpc_handler.cpp src/stdio_transport.cpp src/http_server.cpp \
+              src/rpc_handler.cpp src/stdio_transport.cpp src/http_server.cpp src/camera_stream.cpp \
               -o build/bambu-bridge
 
       # --- Build the plugin-independent self-test ---
@@ -37,7 +37,7 @@ jobs:
           g++ -std=c++17 -O2 -Wall -Wextra \
               -Iinclude -Isrc -pthread -ldl \
               src/self_test.cpp src/bridge.cpp src/plugin_loader.cpp src/json.cpp \
-              src/rpc_handler.cpp src/stdio_transport.cpp src/http_server.cpp \
+              src/rpc_handler.cpp src/stdio_transport.cpp src/http_server.cpp src/camera_stream.cpp \
               -o build/bambu-bridge-self-test
 
       # --- Run self-test (does NOT need the plugin) ---

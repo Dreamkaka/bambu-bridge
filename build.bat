@@ -23,7 +23,7 @@ echo [build] %CXX% -std=c++17 -> %OUT%
 %CXX% -std=c++17 -O2 -Wall -Wextra ^
     -Iinclude -Isrc ^
     src\main.cpp src\bridge.cpp src\plugin_loader.cpp src\json.cpp ^
-    src\rpc_handler.cpp src\stdio_transport.cpp src\http_server.cpp ^
+    src\rpc_handler.cpp src\stdio_transport.cpp src\http_server.cpp src\camera_stream.cpp ^
     -lws2_32 ^
     -o %OUT%
 

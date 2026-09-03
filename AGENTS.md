@@ -83,6 +83,7 @@ cl /std:c++17 /O2 /Iinclude /Isrc /D_WIN32_WINNT=0x0601 ^
 - **Startup sequence** (matches OrcaSlicer): `create_agent` → `set_config_dir` → `init_log` → `set_cert_file` → HTTP headers → callbacks (`queue_on_main`, `get_country_code`, MQTT/login/ssdp) → `set_country_code` → `start` → `start_discovery`. This is done by `init_agent()` at process start; callers should not skip it.
 - **Login**: Browser `GET /login` (ticket OAuth) → `/sign-in/callback` → `get_my_token` + `get_my_profile` → canonical `change_user` payload → `start_subscribe("app")` + `connect_server`. Devices: `list_printers` / `get_user_print_info`. Control: `add_subscribe` + `send_message` (cloud) or `send_message_to_printer` (LAN).
 - **Cert**: `--cert <folder>` or auto-detect `slicer_base64.cer` (OrcaSlicer `resources/cert`).
+- **Camera**: `GET /camera.ts?dev_id=` uses `BambuSource` (`Bambu_Create/Open/StartStream/ReadSample`) and remuxes H264 into MPEG-TS. Cloud URL is `get_camera_url("{id}|{ver}|\"tutk\",\"agora\"")`. LAN: `?ip=&password=&proto=local|rtsp|rtsps`. Not a real RTSP server.
 - **Transport Flags**:
   - If `--http <port>` is omitted and `--no-stdio` is not set, `--stdio` is automatically active.
   - To run HTTP server only in background: `bambu-bridge --plugin-dir <dir> --http 8080 --no-stdio`.
