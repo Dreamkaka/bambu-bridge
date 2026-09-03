@@ -8,7 +8,7 @@
 
 调用方**不要**再手动走一遍这套生命周期，除非你在做热重启。
 
-全部 RPC 方法与参数见 **[RPC.md](RPC.md)**。
+全部 RPC 方法与参数见 **[RPC.md](RPC.md)**。摄像头 / MPEG-TS 见 **[CAMERA.md](CAMERA.md)**。
 
 ---
 
@@ -216,29 +216,15 @@ curl -s -X POST http://127.0.0.1:8080/rpc \
 
 HTTP 状态码几乎总是 `200`；业务成败看 body 里的 `ok` / `result.code`。
 
-### `GET /camera.ts?dev_id=<serial>`
+### `GET /camera.ts` / `GET /camera.html`
 
-把 BambuSource 的 H264 封装成 MPEG-TS 直播。VLC / ffmpeg / mpegts.js 可播。**不是**标准 RTSP 服务器。
-
-云端（需已登录、已订阅）：
+BambuSource 转 MPEG-TS。完整参数、LAN/云端、播放器示例见 **[CAMERA.md](CAMERA.md)**。
 
 ```
-http://127.0.0.1:8080/camera.ts?dev_id=SERIAL
 vlc http://127.0.0.1:8080/camera.ts?dev_id=SERIAL
-ffplay -fflags nobuffer http://127.0.0.1:8080/camera.ts?dev_id=SERIAL
-```
-
-局域网：
-
-```
+http://127.0.0.1:8080/camera.html?dev_id=SERIAL
 http://127.0.0.1:8080/camera.ts?dev_id=SERIAL&ip=192.168.1.10&password=ACCESS_CODE&proto=local
 ```
-
-`proto`：`local`（TCP 6000）、`rtsp`、`rtsps`。
-
-可选：`dev_ver`、`user`（默认 `bblp`）、`protocols`（云端，默认 `"tutk","agora"`）。
-
-浏览器页：`http://127.0.0.1:8080/camera.html?dev_id=SERIAL`（用 mpegts.js）。
 
 ### `POST /api/<method>`
 
@@ -567,7 +553,7 @@ Studio 信息页 URL。
 | `dev_ver` | string | 固件版本，可从 pushall 取 |
 | `ip` / `user` / `password` / `proto` | string | LAN：`proto`=`local`/`rtsp`/`rtsps` |
 
-`result`：`{ code, url, play_url }`。`url` 是 `bambu:///`；`play_url` 是 MPEG-TS。浏览器/VLC 用 `GET /camera.ts?dev_id=`。
+`result`：`{ code, url, play_url }`。`url` 是 `bambu:///`（VLC 不能播）；`play_url` 才是 MPEG-TS。详见 **[CAMERA.md](CAMERA.md)**。
 
 #### `get_model_mall_detail_url`
 

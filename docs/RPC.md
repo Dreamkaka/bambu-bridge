@@ -12,6 +12,8 @@ POST /api/<name>
 
 stdio：一行一个 `{"method":"...","params":{...}}`。
 
+摄像头拉流（`/camera.ts`、LAN/云端、VLC）见 **[CAMERA.md](CAMERA.md)**。
+
 ---
 
 ## 能力边界（先读）
@@ -169,7 +171,7 @@ stdio：一行一个 `{"method":"...","params":{...}}`。
 | `get_printer_firmware` | `dev_id` | `{code, http_code, http_body}` |
 | `get_slice_info` | `project_id`，`profile_id`，`plate_index` 默认 0 | `{code, slice_json}` |
 | `get_subtask_info` | `subtask_id` | `{code, task_json, http_code, http_body}` |
-| `get_camera_url` | `dev_id`；可选 `protocols`、`dev_ver`、`ip`、`user`、`password`、`proto` | `{code, url, play_url}`。`url` 是 `bambu:///`；`play_url` 是可播的 MPEG-TS |
+| `get_camera_url` | 见下 | `{code, url, play_url}`。`bambu:///` 不能进 VLC，播 `play_url` / `/camera.ts` |
 | `get_model_mall_detail_url` | `id` 模型 id | `{code, url}` |
 
 `list_printers` 的 `http_body` 解析后：
@@ -189,6 +191,23 @@ stdio：一行一个 `{"method":"...","params":{...}}`。
   ]
 }
 ```
+
+### `get_camera_url`
+
+只换票，不推流。播视频用返回的 `play_url` 或直接 `GET /camera.ts`。完整说明见 **[CAMERA.md](CAMERA.md)**。
+
+| 参数 | 类型 | 默认 |
+|------|------|------|
+| `dev_id` | string | 必填 |
+| `protocols` | string | `"tutk","agora"` |
+| `dev_ver` | string | 固件版本 |
+| `ip` / `user` / `password` / `proto` | string | 有 `ip` 则 LAN；`proto`=`local`/`rtsp`/`rtsps` |
+
+```json
+{ "method": "get_camera_url", "params": { "dev_id": "SERIAL" } }
+```
+
+`result.url` 是 `bambu:///`（VLC 不能播），`result.play_url` 是 MPEG-TS。
 
 ---
 
@@ -237,7 +256,7 @@ stdio：一行一个 `{"method":"...","params":{...}}`。
   "method": "send_message",
   "params": {
     "dev_id": "SERIAL",
-    "json_str": "{\"system\":{\"command\":\"ledctrl\",\"led_node\":\"chamber_light\",\"led_mode\":\"off\",\"sequence_id\":\"1\"}}"
+    "json_str": "{\"system\":{\"sequence_id\":\"0\",\"command\":\"ledctrl\",\"led_node\":\"chamber_light\",\"led_mode\":\"off\",\"led_on_time\":500,\"led_off_time\":500,\"loop_times\":0,\"interval_time\":0}}"
   }
 }
 ```
@@ -349,21 +368,44 @@ curl -s -X POST http://127.0.0.1:8080/api/pushall \
 
 #### `ledctrl` 别名 `set_light`
 
+打印机对灯光 JSON **字段齐全** 才接受，缺 `led_on_time` 等会回 `json wrong format`。
+
 | 参数 | 类型 | 默认 |
 |------|------|------|
 | `led_node` | string | `"chamber_light"` |
 | `led_mode` 或 `mode` | string | `"on"` |
 | `led_on_time` | number | `500` ms |
 | `led_off_time` | number | `500` |
-| `loop_times` | number | `1` |
-| `interval_time` | number | `1000` |
+| `loop_times` | number | `1`（不少机型开关灯用 `0`） |
+| `interval_time` | number | `1000`（开关灯常用 `0`） |
 
 `led_mode`：`on` / `off` / `flashing`  
-`led_node`：`chamber_light` / `chamber_light2`（双灯机）
+`led_node`：`chamber_light`、`chamber_light2`（双灯）、`heatbed_light`
+
+封装调用：
 
 ```json
-{ "method": "set_light", "params": { "dev_id": "SERIAL", "mode": "off" } }
+{ "method": "set_light", "params": { "dev_id": "SERIAL", "mode": "on", "loop_times": 0, "interval_time": 0 } }
 ```
+
+下发的 MQTT 必须是：
+
+```json
+{
+  "system": {
+    "sequence_id": "0",
+    "command": "ledctrl",
+    "led_node": "chamber_light",
+    "led_mode": "on",
+    "led_on_time": 500,
+    "led_off_time": 500,
+    "loop_times": 0,
+    "interval_time": 0
+  }
+}
+```
+
+自己拼 `send_message` 的 `json_str` 时同样要带齐这 8 个字段。双灯机再对 `chamber_light2` 发一条。
 
 ---
 

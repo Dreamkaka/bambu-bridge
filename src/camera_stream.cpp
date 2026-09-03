@@ -1,6 +1,7 @@
 #include "camera_stream.hpp"
 #include "bambu_tunnel.hpp"
 #include "bridge.hpp"
+#include "json.hpp"
 
 #include <cstring>
 #include <vector>
@@ -278,6 +279,35 @@ std::string build_lan_camera_url(const std::string& ip, const std::string& user,
     return url;
 }
 
+std::string ota_from_json(const std::string& msg) {
+    Json j;
+    if (msg.empty() || !json_parse(msg, &j)) return {};
+    const Json* info = j.find("info");
+    const Json* mods = info ? info->find("module") : nullptr;
+    if (!mods || mods->kind != Json::Array) return {};
+    for (const auto& m : mods->arr) {
+        const Json* name = m.find("name");
+        const Json* ver = m.find("sw_ver");
+        if (name && name->kind == Json::String && name->str == "ota" && ver && ver->kind == Json::String)
+            return ver->str;
+    }
+    return {};
+}
+
+std::string resolve_ota_version(BambuBridge& bridge, const std::string& dev_id, const std::string& given) {
+    if (!given.empty()) return given;
+    std::string v = ota_from_json(bridge.last_printer_msg(dev_id));
+    if (!v.empty()) return v;
+    Json cmd = Json::object();
+    Json info = Json::object();
+    info.set("sequence_id", Json::s("0"));
+    info.set("command", Json::s("get_version"));
+    cmd.set("info", info);
+    auto w = bridge.printer_command_wait(dev_id, json_dump(cmd), false, 8000, 0, 0);
+    v = ota_from_json(w.msg);
+    return v;
+}
+
 std::string resolve_camera_url(BambuBridge& bridge, const std::string& dev_id,
                                const std::string& protocols, const std::string& lan_ip,
                                const std::string& lan_user, const std::string& lan_passwd,
@@ -296,23 +326,24 @@ std::string resolve_camera_url(BambuBridge& bridge, const std::string& dev_id,
             return {};
         }
     }
+    std::string ver = resolve_ota_version(bridge, dev_id, dev_ver);
     std::string proto = protocols.empty() ? "\"tutk\",\"agora\"" : protocols;
-    std::string key = dev_id;
-    if (!dev_ver.empty() || !proto.empty()) {
-        key += "|";
-        key += dev_ver;
-        key += "|";
-        key += proto;
-    }
+    std::string key = dev_id + "|" + ver + "|" + proto;
     std::string url;
     int r = bridge.get_camera_url(key, &url);
     if (r != 0 || url.empty() || url.rfind("bambu:///", 0) != 0) {
-        if (err) *err = url.empty() ? ("get_camera_url failed: " + std::to_string(r)) : url;
+        std::string raw = url.empty() ? ("code=" + std::to_string(r)) : url;
+        if (err) {
+            *err = "get_camera_url failed: " + raw
+                + " (dev_ver=" + (ver.empty() ? std::string("<empty>") : ver) + ")";
+            if (raw.find("403") != std::string::npos)
+                *err += " cloud camera 403: need OTA version, or tutk disabled, or try LAN ?ip=&password=";
+        }
         return {};
     }
     url += "&device=" + dev_id;
     url += "&net_ver=" + bridge.version();
-    if (!dev_ver.empty()) url += "&dev_ver=" + dev_ver;
+    if (!ver.empty()) url += "&dev_ver=" + ver;
     return url;
 }
 

@@ -9,6 +9,8 @@
 #include <cstdlib>
 #include <chrono>
 #include <cerrno>
+#include <fstream>
+#include <random>
 
 #if defined(_WIN32)
 #  define WIN32_LEAN_AND_MEAN
@@ -1015,10 +1017,27 @@ void BambuBridge::install_callbacks() {
 
 void BambuBridge::apply_studio_http_headers() {
     if (!has_agent() || !fn_set_extra_http_header) return;
+    std::string uuid_path = join2(config_dir_.empty() ? join2(default_home(), "bambu-bridge") : config_dir_, "slicer_uuid");
+    std::string uuid;
+    {
+        std::ifstream in(uuid_path.c_str());
+        if (in) std::getline(in, uuid);
+    }
+    if (uuid.size() < 8) {
+        std::mt19937 rng{(unsigned)std::chrono::steady_clock::now().time_since_epoch().count()};
+        char buf[37];
+        auto h4 = [&]() { return rng() & 0xffff; };
+        std::snprintf(buf, sizeof(buf), "%04x%04x-%04x-%04x-%04x-%04x%04x%04x",
+                      h4(), h4(), h4(), (h4() & 0x0fff) | 0x4000, (h4() & 0x3fff) | 0x8000, h4(), h4(), h4());
+        uuid = buf;
+        std::ofstream out(uuid_path.c_str(), std::ios::trunc);
+        if (out) out << uuid;
+    }
     std::map<std::string, std::string> h;
     h["X-BBL-Client-Type"] = "slicer";
     h["X-BBL-Client-Name"] = "BambuStudio";
     h["X-BBL-Client-Version"] = "02.05.02.51";
+    h["X-BBL-Device-ID"] = uuid;
 #if defined(_WIN32)
     h["X-BBL-OS-Type"] = "windows";
 #elif defined(__APPLE__)
