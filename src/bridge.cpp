@@ -544,11 +544,13 @@ int BambuBridge::send_message(const std::string& dev_id, const std::string& json
     int r = fn_send_message(agent_, dev_id, json_str, qos, flag);
     if (r != BAMBU_NETWORK_ERR_CONNECT_FAILED) return r;
     ready = ensure_cloud_ready(dev_id, 15000, &e, true);
-    if (ready != BAMBU_NETWORK_SUCCESS) {
-        set_user_selected_machine(dev_id);
-        add_subscribe({dev_id});
-        std::this_thread::sleep_for(std::chrono::milliseconds(800));
-    }
+    // A failed send means the plugin's attachment is stale even when the
+    // cloud connection is still reported as healthy. Refresh the subscription
+    // explicitly before retrying the publish.
+    set_user_selected_machine(dev_id);
+    if (fn_start_subscribe) fn_start_subscribe(agent_, "app");
+    add_subscribe({dev_id});
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     return fn_send_message(agent_, dev_id, json_str, qos, flag);
 }
 int BambuBridge::send_message_to_printer(const std::string& dev_id, const std::string& json_str, int qos, int flag) {
@@ -630,13 +632,15 @@ int BambuBridge::ensure_cloud_ready(const std::string& dev_id, int timeout_ms, s
         unmark_printer_mqtt(dev_id);
         ready = false;
     }
-    if (ready && selected == dev_id) return BAMBU_NETWORK_SUCCESS;
+    if (ready && selected == dev_id && !force) return BAMBU_NETWORK_SUCCESS;
 
     set_user_selected_machine(dev_id);
     // The networking plugin uses the selected machine when attaching the
     // printer MQTT session. Set it before subscribing (same order as
     // BambuStudio) or send_message can return -2 even though the cloud is up.
-    add_subscribe({dev_id});
+    int subscribe_result = add_subscribe({dev_id});
+    if (subscribe_result != BAMBU_NETWORK_SUCCESS && err)
+        *err = "add_subscribe failed: " + std::to_string(subscribe_result);
     if (printer_mqtt_ready(dev_id) && get_user_selected_machine() == dev_id)
         return BAMBU_NETWORK_SUCCESS;
 
@@ -712,11 +716,10 @@ BambuBridge::CommandWait BambuBridge::printer_command_wait(const std::string& de
     if (out.code == BAMBU_NETWORK_ERR_CONNECT_FAILED && !lan) {
         std::string attach_err;
         int ready = ensure_cloud_ready(dev_id, timeout_ms > 0 ? timeout_ms : 10000, &attach_err, true);
-        if (ready != BAMBU_NETWORK_SUCCESS) {
-            set_user_selected_machine(dev_id);
-            add_subscribe({dev_id});
-            std::this_thread::sleep_for(std::chrono::milliseconds(800));
-        }
+        set_user_selected_machine(dev_id);
+        if (fn_start_subscribe) fn_start_subscribe(agent_, "app");
+        add_subscribe({dev_id});
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         out.code = send_once();
         if (out.code != BAMBU_NETWORK_SUCCESS && !attach_err.empty()) out.error = attach_err;
     }
