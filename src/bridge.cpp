@@ -545,8 +545,8 @@ int BambuBridge::send_message(const std::string& dev_id, const std::string& json
     if (r != BAMBU_NETWORK_ERR_CONNECT_FAILED) return r;
     ready = ensure_cloud_ready(dev_id, 15000, &e, true);
     if (ready != BAMBU_NETWORK_SUCCESS) {
-        add_subscribe({dev_id});
         set_user_selected_machine(dev_id);
+        add_subscribe({dev_id});
         std::this_thread::sleep_for(std::chrono::milliseconds(800));
     }
     return fn_send_message(agent_, dev_id, json_str, qos, flag);
@@ -632,15 +632,18 @@ int BambuBridge::ensure_cloud_ready(const std::string& dev_id, int timeout_ms, s
     }
     if (ready && selected == dev_id) return BAMBU_NETWORK_SUCCESS;
 
-    add_subscribe({dev_id});
     set_user_selected_machine(dev_id);
+    // The networking plugin uses the selected machine when attaching the
+    // printer MQTT session. Set it before subscribing (same order as
+    // BambuStudio) or send_message can return -2 even though the cloud is up.
+    add_subscribe({dev_id});
     if (printer_mqtt_ready(dev_id) && get_user_selected_machine() == dev_id)
         return BAMBU_NETWORK_SUCCESS;
 
     int r = wait_printer_mqtt(dev_id, timeout_ms);
     if (r != BAMBU_NETWORK_SUCCESS) {
-        add_subscribe({dev_id});
         set_user_selected_machine(dev_id);
+        add_subscribe({dev_id});
         r = wait_printer_mqtt(dev_id, 5000);
     }
     if (r != BAMBU_NETWORK_SUCCESS) {
@@ -710,8 +713,8 @@ BambuBridge::CommandWait BambuBridge::printer_command_wait(const std::string& de
         std::string attach_err;
         int ready = ensure_cloud_ready(dev_id, timeout_ms > 0 ? timeout_ms : 10000, &attach_err, true);
         if (ready != BAMBU_NETWORK_SUCCESS) {
-            add_subscribe({dev_id});
             set_user_selected_machine(dev_id);
+            add_subscribe({dev_id});
             std::this_thread::sleep_for(std::chrono::milliseconds(800));
         }
         out.code = send_once();
@@ -996,8 +999,8 @@ void BambuBridge::install_callbacks() {
                     if (!is_user_login()) return;
                     std::string sel = get_user_selected_machine();
                     if (sel.empty()) return;
-                    add_subscribe({sel});
                     set_user_selected_machine(sel);
+                    add_subscribe({sel});
                 });
             }
         });
@@ -1040,8 +1043,8 @@ void BambuBridge::install_callbacks() {
             if (!dev_id.empty()) {
                 queue_on_main([this, dev_id]() {
                     if (!is_user_login() || !is_server_connected()) return;
-                    add_subscribe({dev_id});
                     set_user_selected_machine(dev_id);
+                    add_subscribe({dev_id});
                 });
             }
         });
