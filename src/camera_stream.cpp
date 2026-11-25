@@ -346,10 +346,10 @@ std::string resolve_ota_version(BambuBridge& bridge, const std::string& dev_id, 
     if (!v.empty()) return v;
     Json cmd = Json::object();
     Json info = Json::object();
-    info.set("sequence_id", Json::s("0"));
+    info.set("sequence_id", Json::s(BambuBridge::next_command_sequence()));
     info.set("command", Json::s("get_version"));
     cmd.set("info", info);
-    auto w = bridge.printer_command_wait(dev_id, json_dump(cmd), false, 8000, 0, 0);
+    auto w = bridge.printer_command(dev_id, json_dump(cmd), false);
     v = ota_from_json(w.msg);
     return v;
 }

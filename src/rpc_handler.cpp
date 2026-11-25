@@ -161,14 +161,13 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
             bool wait = bool_param(p, "wait", true);
             int timeout_ms = (int)num_param(p, "timeout_ms", 8000);
             Json res = Json::object();
+            auto w = bridge.printer_command(dev, json_str, lan, timeout_ms,
+                                            (int)num_param(p, "qos", 0), (int)num_param(p, "flag", 0), wait);
             if (!wait) {
-                int r = bridge.printer_command(dev, json_str, lan,
-                                               (int)num_param(p, "qos", 0), (int)num_param(p, "flag", 0));
-                res.set("code", Json::n(r));
+                res.set("code", Json::n(w.code));
+                if (!w.error.empty()) res.set("error", Json::s(w.error));
                 return resp_ok(res);
             }
-            auto w = bridge.printer_command_wait(dev, json_str, lan, timeout_ms,
-                                                 (int)num_param(p, "qos", 0), (int)num_param(p, "flag", 0));
             res.set("code", Json::n(w.code));
             res.set("timed_out", Json::boolean(w.timed_out));
             res.set("dev_id", Json::s(w.dev_id));
@@ -181,9 +180,7 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
             if (!w.msg.empty() && json_parse(w.msg, &parsed))
                 res.set("payload", parsed);
             if (!w.error.empty()) res.set("error", Json::s(w.error));
-            else if (w.timed_out) res.set("error", Json::s("timeout waiting for printer message"));
-            else if (w.code == BAMBU_NETWORK_ERR_CONNECT_FAILED && w.error.empty())
-                res.set("error", Json::s("connect failed (-2): printer MQTT not ready"));
+            else if (w.timed_out) res.set("error", Json::s("publish accepted; no matching printer report before timeout"));
             return resp_ok(res);
         };
 
@@ -207,10 +204,7 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
             cmd.set("pushing", pushing);
             return wait_cmd(dev, json_dump(cmd), bool_param(p, "lan", false));
         }
-        auto seq = []() -> std::string {
-            static int n = 20000;
-            return std::to_string(n++);
-        };
+        auto seq = &BambuBridge::next_command_sequence;
         auto print_cmd = [&](const char* command) {
             Json cmd = Json::object();
             Json print = Json::object();

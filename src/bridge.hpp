@@ -113,7 +113,6 @@ public:
     int  add_subscribe(const std::vector<std::string>& dev_list);
     int  del_subscribe(const std::vector<std::string>& dev_list);
     void enable_multi_machine(bool enable);
-    int  send_message(const std::string& dev_id, const std::string& json_str, int qos, int flag);
     int  send_message_to_printer(const std::string& dev_id, const std::string& json_str, int qos, int flag);
 
     int  connect_printer(const std::string& dev_id, const std::string& dev_ip,
@@ -140,7 +139,6 @@ public:
     int  start_local_print(const Json& params_json, std::function<void(int, std::string)> update_cb,
                            std::function<bool()> cancel_cb);
 
-    int  printer_command(const std::string& dev_id, const std::string& json_str, bool lan, int qos = 0, int flag = 0);
 
     struct CommandWait {
         int code = BAMBU_NETWORK_ERR_TIMEOUT;
@@ -150,10 +148,13 @@ public:
         std::string msg;
         std::string error;
     };
-    int  ensure_cloud_ready(const std::string& dev_id, int timeout_ms = 10000, std::string* err = nullptr,
-                            bool force = false);
-    CommandWait printer_command_wait(const std::string& dev_id, const std::string& json_str, bool lan,
-                                     int timeout_ms = 8000, int qos = 0, int flag = 0);
+    int  ensure_cloud_ready(const std::string& dev_id, int timeout_ms = 10000, std::string* err = nullptr);
+    CommandWait printer_command(const std::string& dev_id, const std::string& json_str, bool lan,
+                                int timeout_ms = 8000, int qos = 0, int flag = 0, bool wait = true);
+    static std::string next_command_sequence() {
+        static std::atomic<unsigned> n{20000};
+        return std::to_string(n.fetch_add(1, std::memory_order_relaxed));
+    }
     std::string last_printer_msg(const std::string& dev_id) const;
 
     void set_event_sink(EventSink* s);
@@ -180,7 +181,6 @@ private:
     static std::string parse_printer_id(const std::string& topic);
     void mark_printer_mqtt(const std::string& dev_id);
     void unmark_printer_mqtt(const std::string& dev_id);
-    int  wait_printer_mqtt(const std::string& dev_id, int timeout_ms);
 
     PluginHandle net_, src_;
     std::vector<PluginHandle> companions_;
@@ -206,13 +206,14 @@ private:
 
     struct PendingWait {
         std::string dev_id;
+        bool lan_only = false;
+        std::string group, command, sequence;
         std::condition_variable cv;
         bool done = false;
         std::string source;
         std::string msg;
     };
     mutable std::mutex wait_mtx_;
-    std::condition_variable mqtt_cv_;
     std::vector<std::shared_ptr<PendingWait>> pending_waits_;
     std::map<std::string, std::pair<std::string, std::string>> last_msg_;
     std::set<std::string> mqtt_ready_;

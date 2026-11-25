@@ -88,6 +88,7 @@ struct detectResult {
     std::string connect_type;
 };
 
+// By-value layout for the bundled, unversioned Open Bamboo 02.08.04 ABI.
 struct PrintParams {
     std::string dev_id;
     std::string task_name;
@@ -122,6 +123,7 @@ struct PrintParams {
     bool task_vibration_cali;
     bool task_layer_inspect;
     bool task_record_timelapse;
+    bool task_timelapse_use_internal;
     bool task_use_ams;
     std::string task_bed_type;
     std::string extra_options;
@@ -131,6 +133,9 @@ struct PrintParams {
     int extruder_cali_manual_mode{-1};
     bool task_ext_change_assist;
     bool try_emmc_print;
+    std::string svc_context;
+    std::string slicer_uid;
+    std::string queue_plate_id;
 };
 
 struct TaskQueryParams {
@@ -248,6 +253,5 @@ typedef int (*func_track_get_property)(void* agent, std::string name, std::strin
 // ----------------------------------------------------------------------------
 typedef int (*func_send_message_legacy)(void* agent, std::string dev_id, std::string json_str, int qos);
 typedef int (*func_send_message_to_printer_legacy)(void* agent, std::string dev_id, std::string json_str, int qos);
-typedef int (*func_start_print_legacy)(void* agent, PrintParams params, OnUpdateStatusFn update_fn, WasCancelledFn cancel_fn, OnWaitFn wait_fn);
 
 #endif // BAMBU_BRIDGE_BAMBU_ABI_HPP

@@ -17,7 +17,7 @@
 Windows（必须 MSVC 编译，MinGW 与 DLL 的 C++ ABI 不兼容）：
 
 ```bat
-run.bat --country CN --http 8080 --no-stdio
+run.bat
 ```
 
 Linux：
@@ -44,7 +44,7 @@ Linux：
 | `--no-stdio` | 只开 HTTP | |
 | `--help` | 帮助 | |
 
-直接启动二进制时，`--plugin-dir` 缺失或加载失败会退出；Windows x64 的 `run.bat` 会自动传入随附插件目录。云配置见 [README 的运行说明](../README.md#运行)。
+直接启动二进制时，`--plugin-dir` 缺失或加载失败会退出。Windows x64 的 `run.bat` 会自动传入随附插件目录，并默认监听 HTTP `8080`；可以用 `--http <port>` 覆盖。云配置见 [README 的运行说明](../README.md#运行)。
 
 证书是 OrcaSlicer 自带的 DigiCert 公钥证书，用于插件校验 `*.bambulab.com` HTTPS，**不需要也不应该去偷任何私钥**。
 
@@ -116,7 +116,7 @@ HTTP 和 stdio 共用同一套分发：
 
 ### 2.5 发命令并等待 payload
 
-`pushall` / `pause` / `resume` / `stop` / `send_message` / `send_message_to_printer` / `printer_command` **默认会阻塞**，直到该 `dev_id` 上收到下一条打印机消息（或超时）。
+控制命令默认等待匹配的打印机回报。`code: 0` 表示插件接受发送，不代表命令执行成功；`timed_out: true` 表示未等到回报，不宜据此重发。具体匹配规则见 [RPC.md](RPC.md#控制类-result默认-waittrue)。
 
 默认 `wait=true`，`timeout_ms=8000`。
 
@@ -577,7 +577,7 @@ Studio 信息页 URL。
 |------|------|
 | `dev_list` | string[]，序列号列表 |
 
-云端 MQTT 订阅指定打印机。控制前必须 `add_subscribe`。
+订阅指定打印机的云端上报。网关发送命令时会自动订阅目标，不需要等 `on_printer_connected` 才能发第一条命令。
 
 #### `enable_multi_machine`
 
@@ -589,7 +589,7 @@ Studio 信息页 URL。
 
 | 参数 | 类型 | 默认 |
 |------|------|------|
-| `wait` | bool | `true`，阻塞直到该机下一条消息 |
+| `wait` | bool | `true`，等待匹配的回报；`false` 只发布 |
 | `timeout_ms` | number | `8000` |
 
 #### `send_message`
@@ -642,7 +642,7 @@ curl -s -X POST http://127.0.0.1:8080/api/pushall \
   -d '{"dev_id":"22E8BJ630901079"}'
 ```
 
-`result.payload` 即全量状态。内部发送：
+`result.payload` 是等待期间收到的 `print.push_status`，可能是周期性增量上报，不保证是全量快照。内部发送：
 
 ```json
 {

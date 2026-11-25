@@ -98,10 +98,10 @@ cl /std:c++17 /EHsc /MD /O2 /Iinclude /Isrc ^
 Windows x64（先用 x64 MSVC 重新编译，不要用旧的 MinGW 产物）：
 
 ```bat
-run.bat --country CN --http 8080 --no-stdio
+run.bat
 ```
 
-`run.bat` 从自身所在目录定位 `build\bambu-bridge.exe` 和 `open_bambu_networking_plugin\bin\win_x64`。直接启动 exe 时仍需显式传 `--plugin-dir`。
+`run.bat` 自动定位 Windows x64 插件和 exe，默认启动 HTTP（TCP `8080`），不启用 stdio。用 `run.bat --http 8081` 换端口，用 `run.bat --http 0 --stdio` 只开 stdio。直接启动 exe 时仍需显式传 `--plugin-dir` 和 `--http` 才会启用 HTTP。
 
 Linux x64：
 

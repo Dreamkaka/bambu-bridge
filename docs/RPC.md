@@ -30,7 +30,7 @@ stdio：一行一个 `{"method":"...","params":{...}}`。
 控制前必须：
 
 1. 已登录（`is_user_login=true`）
-2. 云端：`add_subscribe({dev_list:[serial]})`
+2. 云端：在 bridge 的 `--config-dir/obn.conf` 中显式允许云连接（`block_cloud = 0`），重启后使用已登录的账号；命令会自动建立 MQTT 连接并订阅目标设备。
 3. LAN：`connect_printer` 成功
 
 ---
@@ -70,14 +70,14 @@ stdio：一行一个 `{"method":"...","params":{...}}`。
 
 | 字段 | 含义 |
 |------|------|
-| `code` | 发出去的插件返回码，`0` 已发出 |
-| `timed_out` | 超时没等到该机下一条 MQTT |
-| `source` | `cloud` / `lan` |
+| `code` | 连接、订阅或发布的返回码；`0` 表示插件接受发布，不证明打印机已执行 |
+| `timed_out` | 发布被接受，但等待匹配回报超时。不要因此自动重发控制命令 |
+| `source` | 实际收到回报的通道 `cloud` / `lan`；Open Bamboo 的 `send_message` 可优先复用已有 LAN 连接 |
 | `msg` | 原始 JSON 字符串 |
 | `payload` | `msg` 再 parse 后的对象，优先用这个 |
-| `error` | 仅超时时有 |
+| `error` | 初始化连接、订阅、发布或等待回报的失败原因 |
 
-`wait=false` 时只返回 `{ "code": 0 }`，回报走 SSE `/events`。
+`wait=false` 跳过回报等待，不跳过连接或发布检查。单命名空间命令按设备、命名空间和 `command` 匹配；请求有 `sequence_id` 时还必须匹配序号。`pushall` 等 `print.push_status`，不是独占回执；没有可识别 `command` 的原始对象只能等同设备上报。请用 `wait=false` 和 `/events` 处理不回显序号的固件命令。
 
 ### 所有控制命令共用字段
 
@@ -85,8 +85,8 @@ stdio：一行一个 `{"method":"...","params":{...}}`。
 |------|------|------|------|
 | `dev_id` | string | | 打印机序列号，必填 |
 | `lan` | bool | `false` | `true` 走局域网 MQTT |
-| `wait` | bool | `true` | 等该机下一条消息 |
-| `timeout_ms` | number | `8000` | 等待超时 |
+| `wait` | bool | `true` | 等待匹配的回报 |
+| `timeout_ms` | number | `8000` | 网关等待连接和回报的时间预算；不能中断同步插件调用 |
 | `qos` | number | `0` | MQTT QoS |
 | `flag` | number | `0` | 消息标志 |
 
@@ -221,7 +221,7 @@ stdio：一行一个 `{"method":"...","params":{...}}`。
 | `del_subscribe` | `dev_list` string[] | int |
 | `enable_multi_machine` | `enable` bool 默认 `true` | `0` |
 
-云端控制前必须 `add_subscribe`。登录后已自动 `start_subscribe("app")`。
+直接调用控制 RPC 不需要先选中机器、手动订阅或等待首次遥测。Open Bamboo 的 `start_subscribe("app")` 不订阅设备主题；真正订阅是 `add_subscribe`，由网关发送路径执行。
 
 ---
 
@@ -274,6 +274,8 @@ stdio：一行一个 `{"method":"...","params":{...}}`。
 #### `pushall`
 
 无特有参数。要全量状态。
+
+返回的 `print.push_status` 也可能是增量上报，不能把它当成设备确认或完整快照。
 
 内部：
 
