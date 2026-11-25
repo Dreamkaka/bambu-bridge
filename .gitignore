@@ -33,6 +33,10 @@ linux_02.05.02.58/
 **/win_02.05.02.76/
 **/linux_02.05.02.58/
 
+# ---- Local Open Bambu Networking plugin (runtime only) ---------------------
+/open_bambu_networking_plugin/
+/open_bambu_networking_plugin.zip
+
 # ---- logs / runtime state ---------------------------------------------------
 *.log
 Hook.log

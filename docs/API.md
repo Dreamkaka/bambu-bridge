@@ -1,6 +1,6 @@
 # bambu-bridge 接口文档
 
-`bambu-bridge` 把 Bambu 官方闭源网络插件（`bambu_networking.dll` / `libbambu_networking.so`）封装成独立进程，对外提供 **HTTP/REST + SSE** 和 **stdio 行分隔 JSON-RPC**。调用方只发 JSON，不直接碰 C++ ABI / MQTT 签名。
+`bambu-bridge` 把 Bambu 网络插件封装成独立进程，对外提供 **HTTP/REST + SSE** 和 **stdio 行分隔 JSON-RPC**。下方启动示例使用项目内的 `open_bambu_networking_plugin`。
 
 进程启动时会自动完成与 OrcaSlicer 相同的 agent 初始化：
 
@@ -17,20 +17,15 @@
 Windows（必须 MSVC 编译，MinGW 与 DLL 的 C++ ABI 不兼容）：
 
 ```bat
-build\bambu-bridge.exe ^
-  --plugin-dir E:\bambu-nx\win_02.05.02.76 ^
-  --country CN ^
-  --cert E:\bambu-nx\OrcaSlicer-bambulab\resources\cert ^
-  --http 8080 --no-stdio
+run.bat --country CN --http 8080 --no-stdio
 ```
 
 Linux：
 
 ```bash
 ./build/bambu-bridge \
-  --plugin-dir ../linux_02.05.02.58 \
+  --plugin-dir ./open_bambu_networking_plugin/bin/linux_x64 \
   --country CN \
-  --cert ../OrcaSlicer-bambulab/resources/cert \
   --http 8080 --no-stdio
 ```
 
@@ -49,7 +44,7 @@ Linux：
 | `--no-stdio` | 只开 HTTP | |
 | `--help` | 帮助 | |
 
-`--plugin-dir` 缺失或加载失败时进程以退出码 `1` 结束。
+直接启动二进制时，`--plugin-dir` 缺失或加载失败会退出；Windows x64 的 `run.bat` 会自动传入随附插件目录。云配置见 [README 的运行说明](../README.md#运行)。
 
 证书是 OrcaSlicer 自带的 DigiCert 公钥证书，用于插件校验 `*.bambulab.com` HTTPS，**不需要也不应该去偷任何私钥**。
 

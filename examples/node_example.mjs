@@ -1,7 +1,7 @@
 // ============================================================================
 // node_example.mjs - talk to bambu-bridge over HTTP/REST JSON (Node >= 18).
 //
-//   ./build/bambu-bridge --plugin-dir ./linux_02.05.02.58 --country CN \
+//   ./build/bambu-bridge --plugin-dir ./open_bambu_networking_plugin/bin/linux_x64 --country CN \
 //                        --http 8080 --no-stdio
 //   node examples/node_example.mjs
 // ============================================================================

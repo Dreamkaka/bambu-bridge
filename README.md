@@ -1,6 +1,6 @@
 # Bambu Bridge — 跨平台 Bambu 网络插件封装进程
 
-把 Bambu 官方闭源网络插件（`bambu_networking.dll` / `libbambu_networking.so`）封装成**一个独立进程**，对外暴露 **HTTP/REST JSON** 和 **stdio JSON-RPC** 两种接口，供其他应用或 agent 调用。这样第三方程序无需直接处理 C++ ABI / MQTT 签名 / 视频流协商，只需发 JSON。
+把 Bambu 网络插件封装成**一个独立进程**，通过 **HTTP/REST JSON** 和 **stdio JSON-RPC** 对外提供接口。下面的运行示例使用项目内的 `open_bambu_networking_plugin`，无需另找官方插件目录。
 
 完整接口见 **[docs/API.md](docs/API.md)**，RPC 参数见 **[docs/RPC.md](docs/RPC.md)**，摄像头见 **[docs/CAMERA.md](docs/CAMERA.md)**，AMS 见 **[docs/AMS.md](docs/AMS.md)**。
 
@@ -16,7 +16,7 @@
         │ dlopen / LoadLibrary  (C++ ABI 转接)
         ▼
  ┌───────────────────────────┐
- │  bambu_networking(.so/.dll)│  ← 官方闭源插件
+ │  bambu_networking(.so/.dll)│  ← Open Bambu Networking
  │  + BambuSource + live555 … │
  └───────────────────────────┘
 ```
@@ -75,15 +75,16 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target bambu-bridge
 ```
 
-### Windows（建议 MSVC）
+### Windows（必须 MSVC）
 
 用 VS 开发者命令行（`cl.exe`）：
 
-```bash
-cl /std:c++17 /O2 /Iinclude /Isrc ^
-   /D_WIN32_WINNT=0x0601 ^
+```bat
+if not exist build mkdir build
+cl /std:c++17 /EHsc /MD /O2 /Iinclude /Isrc ^
+   /D_WIN32_WINNT=0x0601 /DNOMINMAX ^
    src\main.cpp src\bridge.cpp src\plugin_loader.cpp src\json.cpp ^
-   src\rpc_handler.cpp src\stdio_transport.cpp src\http_server.cpp ^
+   src\rpc_handler.cpp src\stdio_transport.cpp src\http_server.cpp src\camera_stream.cpp ^
    ws2_32.lib ^
    /Fe:build\bambu-bridge.exe
 ```
@@ -94,18 +95,23 @@ cl /std:c++17 /O2 /Iinclude /Isrc ^
 
 ## 运行
 
-```bash
-# 同时开 HTTP(:8080) + stdio
-./build/bambu-bridge --plugin-dir ../linux_02.05.02.58 --country CN --http 8080 --stdio
+Windows x64（先用 x64 MSVC 重新编译，不要用旧的 MinGW 产物）：
 
-# 只开 HTTP
-./build/bambu-bridge --plugin-dir ../linux_02.05.02.58 --country CN --http 8080 --no-stdio
-
-# 只开 stdio
-./build/bambu-bridge --plugin-dir ../linux_02.05.02.58 --country CN --stdio
+```bat
+run.bat --country CN --http 8080 --no-stdio
 ```
 
-`--plugin-dir` 指向放 `libbambu_networking.so`（Linux）或 `bambu_networking.dll`（Windows）的目录。
+`run.bat` 从自身所在目录定位 `build\bambu-bridge.exe` 和 `open_bambu_networking_plugin\bin\win_x64`。直接启动 exe 时仍需显式传 `--plugin-dir`。
+
+Linux x64：
+
+```bash
+./build/bambu-bridge --plugin-dir ./open_bambu_networking_plugin/bin/linux_x64 --country CN --http 8080 --no-stdio
+```
+
+其他平台直接通过 `--plugin-dir` 指向 `open_bambu_networking_plugin/bin` 下与操作系统及 bridge 架构匹配的目录。主库和同目录的 `BambuSource`、`live555` 一起使用，不要混用旧插件文件。
+
+**云连接**：如果插件日志出现 `blocked by block_cloud`，在 bridge 的配置目录（`--config-dir`，Windows 默认 `%APPDATA%\bambu-bridge`）里的 `obn.conf` 将 `block_cloud` 设为 `0`，然后重启。`--country` 要和账号区域匹配，登录后再检查 `is_server_connected`；`/health` 只验证进程和 agent 状态，不代表云已连通。
 
 ---
 
@@ -221,4 +227,4 @@ curl -s -X POST http://127.0.0.1:8080/rpc \
 1. **Windows + MinGW 不能调板（ABI）**：见开头。Windows 需 MSVC。
 2. **视频流（BRTC）**：插件内 `bambu_network_get_camera_url_for_golive` 已封装，但 BRTC 协商逻辑在闭源插件内部；本桥只是转发它返回的 URL，本身不实现 WebRTC 协商。
 3. **完整端点仍在扩展中**：当前实现覆盖了控制命令、订阅、登录、任务、打印。部分高级端点（如 `start_publish`、`start_sdcard_print`、tracking、rating 等）未全部封装，可作为后续补充。
-4. **插件依赖**：运行目录需有 `libbambu_networking.so` 同目录的 `libBambuSource.so`、`liblive555.so`、`libagora_rtc_sdk.so`（你已备好）。
+4. **插件依赖**：保留 `open_bambu_networking_plugin/bin/<平台>` 内的同版伴随库，尤其是摄像头需要的 `BambuSource` 和 `live555`。

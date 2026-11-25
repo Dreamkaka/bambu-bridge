@@ -37,4 +37,4 @@ echo "[build] $CXX -std=$STD -> $OUT"
 
 echo "[build] OK: $OUT"
 echo "[build] example:"
-echo "  $OUT --plugin-dir ./linux_02.05.02.58 --country CN --http 8080 --stdio"
+echo "  $OUT --plugin-dir ./open_bambu_networking_plugin/bin/linux_x64 --country CN --http 8080 --stdio"

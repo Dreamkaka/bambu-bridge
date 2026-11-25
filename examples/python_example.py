@@ -2,7 +2,7 @@
 # ============================================================================
 # python_example.py - talk to bambu-bridge over HTTP/REST JSON.
 #
-#   ./build/bambu-bridge --plugin-dir ../linux_02.05.02.58 --country CN \
+#   ./build/bambu-bridge --plugin-dir ./open_bambu_networking_plugin/bin/linux_x64 --country CN \
 #                        --http 8080 --no-stdio
 #   python3 examples/python_example.py
 #

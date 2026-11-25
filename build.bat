@@ -29,7 +29,6 @@ echo [build] %CXX% -std=c++17 -> %OUT%
 
 if errorlevel 1 ( echo [build] FAILED & exit /b 1 )
 echo [build] OK: %OUT%
-echo [example]
-echo   %OUT% --plugin-dir .\win_02.05.02.76 --country CN --http 8080 --stdio
+echo [build] MinGW build only. Rebuild with MSVC x64 before using run.bat.
 
 endlocal
