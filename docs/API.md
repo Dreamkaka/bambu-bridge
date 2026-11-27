@@ -42,6 +42,8 @@ Linux：
 | `--http <port>` | 开 HTTP 服务 | 未指定则不开 HTTP |
 | `--stdio` | 开 stdin/stdout JSON-RPC | 未指定 `--http` 时默认开 |
 | `--no-stdio` | 只开 HTTP | |
+| `--mcp` | 供 MCP 客户端启动的标准 stdio 服务；不能与 `--stdio` 或启用的 HTTP 同时使用 | 关闭 |
+| `--mcp-enable-control` | 在 MCP 工具列表额外启用暂停、恢复、停止 | 关闭 |
 | `--help` | 帮助 | |
 
 直接启动二进制时，`--plugin-dir` 缺失或加载失败会退出。Windows x64 的 `run.bat` 会自动传入随附插件目录，并默认监听 HTTP `8080`；可以用 `--http <port>` 覆盖。云配置见 [README 的运行说明](../README.md#运行)。
@@ -277,6 +279,23 @@ data: {"event":"on_message","payload":{"dev_id":"...","msg":"...","source":"clou
 ```text
 {"event":"on_message","payload":{"dev_id":"...","msg":"...","source":"cloud"}}
 ```
+
+### MCP（stdio）
+
+使用 `bambu-bridge --mcp --plugin-dir <目录>`，不要使用会默认启动 HTTP 的打包脚本。使用 [MCP stdio](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#stdio)，每行一个 JSON-RPC 2.0 消息；日志写入 stderr，旧版异步事件不会混入 stdout。客户端先发送 `initialize`，再发 `notifications/initialized`，然后调用 `tools/list` 和 `tools/call`。也支持 `ping`。
+
+| 工具 | 参数 | 用途 |
+|---|---|---|
+| `bridge_status` | 无 | Bridge 和云端登录状态 |
+| `list_printers` | 无 | 登录账号绑定的设备 |
+| `printer_status` | `dev_id` | 通过云连接请求打印机完整状态 |
+| `printer_firmware` | `dev_id` | 通过云连接查询打印机固件版本 |
+| `camera_snapshot` | `dev_id`；可选 `ip`、`password`、`proto`、`dev_ver` | 返回 MCP `image` 内容（Base64 JPEG）；提供 `ip` 走 LAN，否则走云端 |
+| `pause_print`、`resume_print`、`stop_print` | `dev_id` | 通过云连接控制打印；仅在 `--mcp-enable-control` 下可调用 |
+
+除截图外，工具以 `text` 内容返回现有 RPC 的 JSON 结果。插件报错或等待回执超时会标记 `isError: true`；超时不代表打印机没有收到命令。MCP 不暴露任意 G-code、原始 MQTT 或登录凭据接口。
+
+云端工具需要先在 HTTP 模式登录。同一系统用户下，HTTP 和 MCP 使用相同的默认配置目录，无需指定 `--config-dir`。如果登录时指定了自定义目录或非默认 `--country`，MCP 启动时沿用即可。
 
 ---
 

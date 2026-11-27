@@ -88,6 +88,7 @@ namespace {
 struct Parser {
     const char* p;
     const char* end;
+    unsigned depth = 0;
 
     bool ws() { while (p < end && std::isspace((unsigned char)*p)) ++p; return true; }
     bool eof() const { return p >= end; }
@@ -96,16 +97,22 @@ struct Parser {
 
     bool parse(Json* out) {
         ws();
-        if (eof()) return false;
-        return parse_value(out);
+        if (eof() || !parse_value(out)) return false;
+        ws();
+        return eof();
     }
 
     bool parse_value(Json* out) {
         ws();
         if (eof()) return false;
         char c = *p;
-        if (c == '{') return parse_object(out);
-        if (c == '[') return parse_array(out);
+        if (c == '{' || c == '[') {
+            if (depth >= 128) return false;
+            ++depth;
+            const bool ok = c == '{' ? parse_object(out) : parse_array(out);
+            --depth;
+            return ok;
+        }
         if (c == '"') { out->kind = Json::String; return parse_string(&out->str); }
         if (c == 't') return parse_lit("true", Json::boolean(true), out);
         if (c == 'f') return parse_lit("false", Json::boolean(false), out);

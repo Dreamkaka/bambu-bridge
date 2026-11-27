@@ -43,6 +43,7 @@ echo "[build] $CXX -std=$STD -> $OUT"
     src/json.cpp \
     src/rpc_handler.cpp \
     src/stdio_transport.cpp \
+    src/mcp_stdio.cpp \
     src/http_server.cpp \
     src/camera_stream.cpp \
     "$h264_lib" "$jpeg_lib" -pthread -ldl \

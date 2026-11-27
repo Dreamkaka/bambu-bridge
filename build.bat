@@ -29,6 +29,7 @@ echo [build] %CXX% -std=c++17 -> %OUT%
     -Iinclude -Isrc -I"%CODEC_PREFIX%\include" ^
     src\main.cpp src\bridge.cpp src\plugin_loader.cpp src\json.cpp ^
     src\rpc_handler.cpp src\stdio_transport.cpp src\http_server.cpp src\camera_stream.cpp ^
+    src\mcp_stdio.cpp ^
     "%CODEC_PREFIX%\lib\libopenh264.a" "%CODEC_PREFIX%\lib\libjpeg.a" -lws2_32 ^
     -o %OUT%
 

@@ -1,6 +1,7 @@
 #include "bridge.hpp"
 #include "plugin_loader.hpp"
 #include "stdio_transport.hpp"
+#include "mcp_stdio.hpp"
 #include "http_server.hpp"
 #include "rpc_handler.hpp"
 #include "json.hpp"
@@ -12,6 +13,7 @@
 #include <thread>
 #include <atomic>
 #include <chrono>
+#include <memory>
 
 using namespace bambu;
 
@@ -31,6 +33,8 @@ void usage(const char* prog) {
         "  --http <port>            Enable HTTP/REST server on given port (0 = disabled)\n"
         "  --stdio                  Enable stdio JSON-RPC mode (default: enabled if --http not given)\n"
         "  --no-stdio               Disable stdio JSON-RPC mode\n"
+        "  --mcp                   Serve MCP over stdio instead of HTTP/legacy stdio\n"
+        "  --mcp-enable-control    Expose pause, resume and stop tools in MCP mode\n"
         "  --help                   Show this help\n",
         prog);
 }
@@ -42,6 +46,8 @@ int main(int argc, char** argv) {
     int  http_port = 0;
     bool use_stdio = false;
     bool http_given = false;
+    bool use_mcp = false;
+    bool mcp_control = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -58,15 +64,31 @@ int main(int argc, char** argv) {
         else if (a == "--http") { const char* v = next("--http"); if (v) http_port = atoi(v); http_given = true; }
         else if (a == "--stdio") { use_stdio = true; }
         else if (a == "--no-stdio") { use_stdio = false; }
+        else if (a == "--mcp") use_mcp = true;
+        else if (a == "--mcp-enable-control") mcp_control = true;
         else if (a == "--help") { usage(argv[0]); return 0; }
         else { std::fprintf(stderr, "unknown option: %s\n", a.c_str()); usage(argv[0]); return 1; }
+    }
+
+    if ((use_mcp && (use_stdio || http_port != 0)) || (mcp_control && !use_mcp)) {
+        std::fprintf(stderr, "[bridge] --mcp cannot be combined with --stdio or an enabled HTTP port; "
+                             "--mcp-enable-control requires --mcp\n");
+        return 1;
+    }
+    std::unique_ptr<std::FILE, decltype(&std::fclose)> mcp_output(nullptr, std::fclose);
+    if (use_mcp) {
+        mcp_output.reset(open_mcp_output());
+        if (!mcp_output) {
+            std::fprintf(stderr, "[bridge] could not reserve stdout for MCP\n");
+            return 1;
+        }
     }
 
     // Default country.
     if (cfg.country_code.empty()) cfg.country_code = "CN";
 
     // Default transport: if --http not given, enable stdio by default.
-    if (!http_given && !use_stdio) use_stdio = true;
+    if (!use_mcp && !http_given && !use_stdio) use_stdio = true;
 
     if (!init_sockets()) { std::fprintf(stderr, "[bridge] socket init failed\n"); return 1; }
 
@@ -99,7 +121,10 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (use_stdio) {
+    int exit_code = 0;
+    if (use_mcp) {
+        if (!run_mcp_stdio(bridge, mcp_output.get(), mcp_control)) exit_code = 1;
+    } else if (use_stdio) {
         // stdio loop owns the main thread; HTTP, if any, runs in background.
         run_stdio(bridge);
     } else if (http_port > 0) {
@@ -112,5 +137,5 @@ int main(int argc, char** argv) {
 
     stop_http_server();
     bridge.destroy_agent();
-    return 0;
+    return exit_code;
 }

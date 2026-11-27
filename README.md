@@ -146,6 +146,25 @@ Linux x64：
 - 一行一个响应：`{"ok":true,"result":...}` 或 `{"ok":false,"error":"..."}`
 - 异步事件：`{"event":"...","payload":{...}}`（客户端靠是否有 `event` 键区分）
 
+### MCP（stdio）
+
+在支持 MCP 的客户端中添加本地 stdio 服务。把下面的绝对路径换成自己的可执行文件和随包 `plugins` 目录（Windows 可使用 `C:/.../bambu-bridge.exe`）：
+
+```json
+{
+  "mcpServers": {
+    "bambu-bridge": {
+      "command": "/absolute/path/bambu-bridge",
+      "args": ["--mcp", "--plugin-dir", "/absolute/path/plugins"]
+    }
+  }
+}
+```
+
+默认提供 Bridge 状态、设备列表、打印机状态、固件版本和 JPEG 截图。需要暂停、恢复或停止打印时，才添加 `--mcp-enable-control`。MCP 不开放 HTTP 端口；HTTP 和旧 `--stdio` 调用方式不变。
+
+云端工具需要先用 HTTP 模式登录。同一系统用户下，HTTP 和 MCP 默认读取同一配置目录（Windows：`%APPDATA%\bambu-bridge`；Linux：`~/bambu-bridge`），不用填写 `--config-dir`。只有登录时指定过自定义目录或非默认区域，才在 MCP 参数中沿用。完整工具参数及结果格式见 [API 文档](docs/API.md#mcpstdio)。
+
 ---
 
 ## 方法清单（`method` → 功能）

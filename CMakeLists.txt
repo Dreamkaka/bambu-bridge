@@ -46,6 +46,7 @@ add_executable(bambu-bridge
     src/json.cpp
     src/rpc_handler.cpp
     src/stdio_transport.cpp
+    src/mcp_stdio.cpp
     src/http_server.cpp
     src/camera_stream.cpp
 )
