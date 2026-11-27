@@ -1,7 +1,7 @@
 @echo off
 setlocal
 if exist "%~dp0bambu-bridge.exe" (
-    "%~dp0bambu-bridge.exe" --plugin-dir "%~dp0plugins" --http 8080 %*
+    "%~dp0bambu-bridge.exe" --plugin-dir "%~dp0plugins" --http 8080 --no-stdio %*
     exit /b
 )
 
@@ -17,5 +17,5 @@ if not exist "%PLUGIN_DIR%\bambu_networking.dll" (
     exit /b 1
 )
 
-"%BRIDGE%" --plugin-dir "%PLUGIN_DIR%" --http 8080 %*
+"%BRIDGE%" --plugin-dir "%PLUGIN_DIR%" --http 8080 --no-stdio %*
 exit /b %errorlevel%

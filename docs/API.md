@@ -40,6 +40,7 @@ Linux：
 | `--cert <folder>` | 含 `slicer_base64.cer` 的目录（公开 TLS 证书，不是私钥） | 自动探测 |
 | `--client-version <ver>` | 上报给云端的 `X-BBL-Client-Version` 和摄像头 `net_ver` | 插件 `get_version()` |
 | `--http <port>` | 开 HTTP 服务 | 未指定则不开 HTTP |
+| `--http-loopback` | 仅在 `127.0.0.1` 监听 HTTP/REST 和 MCP；容器默认启用 | 关闭 |
 | `--stdio` | 开 stdin/stdout JSON-RPC | 未指定 `--http` 时默认开 |
 | `--no-stdio` | 只开 HTTP | |
 | `--mcp` | 供 MCP 客户端启动的标准 stdio 服务；不能与 `--stdio` 或启用的 HTTP 同时使用 | 关闭 |

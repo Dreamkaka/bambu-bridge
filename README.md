@@ -107,7 +107,7 @@ Windows x64：
 run.bat
 ```
 
-`run.bat` 默认只启动 HTTP（TCP `8080`）。用 `run.bat --http 8081` 换端口，用 `run.bat --http 0 --stdio` 只开 stdio。从源码构建时，它仍可使用源码目录下的 `open_bambu_networking_plugin`。
+`run.bat` 和 `./run.sh` 默认在端口 `8080` 启动 HTTP，同时提供 Streamable HTTP MCP：`http://127.0.0.1:8080/mcp`。启动日志会打印实际地址。用 `--http 8081` 换端口，或用 `--http 0 --stdio` 只开旧版 stdio。从源码构建时，`run.bat` 也可使用源码目录下的 `open_bambu_networking_plugin`。
 
 Linux x64：
 
@@ -118,6 +118,17 @@ Linux x64：
 需要替换插件或直接调用可执行文件时，传入 `--plugin-dir <目录>`。随包插件固定为 Open Bamboo Networking `v0.2.65`，包含 `BambuSource`、`live555`、AGPL 许可和对应源码链接（`plugins/SOURCE.txt`）。
 
 **云连接**：随包的 `plugins/obn.conf` 设置 `block_cloud = 0`。Bridge 只在用户配置文件不存在时复制该默认值，不覆盖已有配置。已有安装如需允许云连接，将配置目录（`--config-dir`，Windows 默认 `%APPDATA%\bambu-bridge`，Linux 默认 `~/bambu-bridge`）中的 `obn.conf` 改为 `block_cloud = 0` 后重启。若要阻止云连接，设为 `1`。允许云连接不等于已登录；`--country` 要和账号区域匹配。
+
+### Docker / GHCR
+
+[容器工作流](.github/workflows/container.yml) 构建 `linux/amd64` 镜像，内含 Bridge、网络插件和相机编解码器。PR 只构建和验证；默认分支推送 `latest`，`v*` Git 标签推送同名镜像标签，两者还会发布 `sha-<完整提交 SHA>`。
+
+```bash
+docker run -d --name bambu-bridge --network host \
+  -v bambu-bridge-data:/data ghcr.io/dreamkaka/bambu-bridge:latest
+```
+
+在宿主机访问 `http://127.0.0.1:8080/login` 登录，MCP 客户端填 `http://127.0.0.1:8080/mcp`。镜像仅绑定回环地址，使用 `--network host`，不需要也不要加 `-p`。Linux Docker 原生支持；Docker Desktop 需 4.34 或更新版本并启用 **Host networking**。命名卷会保留配置和登录态。GHCR 包若设为私有，拉取前需 `docker login ghcr.io`。
 
 ---
 

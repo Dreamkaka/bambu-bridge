@@ -1,0 +1,10 @@
+*
+!Dockerfile
+!CMakeLists.txt
+!run.bat
+!include/
+!include/**
+!src/
+!src/**
+!packaging/
+!packaging/**

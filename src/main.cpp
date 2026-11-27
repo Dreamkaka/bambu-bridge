@@ -31,6 +31,7 @@ void usage(const char* prog) {
         "  --cert <folder>          Directory containing slicer_base64.cer\n"
         "  --client-version <ver>   X-BBL-Client-Version / camera net_ver (default: plugin get_version)\n"
         "  --http <port>            Enable HTTP/REST server on given port (0 = disabled)\n"
+        "  --http-loopback         Bind HTTP/REST and MCP to 127.0.0.1 only\n"
         "  --stdio                  Enable stdio JSON-RPC mode (default: enabled if --http not given)\n"
         "  --no-stdio               Disable stdio JSON-RPC mode\n"
         "  --mcp                   Serve MCP over stdio instead of HTTP/legacy stdio\n"
@@ -46,6 +47,7 @@ int main(int argc, char** argv) {
     int  http_port = 0;
     bool use_stdio = false;
     bool http_given = false;
+    bool http_loopback = false;
     bool use_mcp = false;
     bool mcp_control = false;
 
@@ -62,6 +64,7 @@ int main(int argc, char** argv) {
         else if (a == "--cert") { const char* v = next("--cert"); if (v) cfg.cert_folder = v; }
         else if (a == "--client-version") { const char* v = next("--client-version"); if (v) cfg.client_version = v; }
         else if (a == "--http") { const char* v = next("--http"); if (v) http_port = atoi(v); http_given = true; }
+        else if (a == "--http-loopback") http_loopback = true;
         else if (a == "--stdio") { use_stdio = true; }
         else if (a == "--no-stdio") { use_stdio = false; }
         else if (a == "--mcp") use_mcp = true;
@@ -115,7 +118,7 @@ int main(int argc, char** argv) {
 
     // Start HTTP on a background thread (runs alongside stdio, if enabled).
     if (http_port > 0) {
-        if (!start_http_server(bridge, http_port, mcp_control)) {
+        if (!start_http_server(bridge, http_port, mcp_control, http_loopback)) {
             std::fprintf(stderr, "[bridge] failed to start HTTP server on port %d\n", http_port);
             return 1;
         }

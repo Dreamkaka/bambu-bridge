@@ -35,14 +35,14 @@ namespace bambu {
 namespace {
 
 // ---- platform socket wrappers ----------------------------------------------
-sock_t make_listen(int port, std::string* err) {
+sock_t make_listen(int port, bool loopback_only, std::string* err) {
 #if defined(_WIN32)
     SOCKET s = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (s == INVALID_SOCKET) { if (err) *err = "socket failed"; return 0; }
     int opt = 1;
     ::setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&opt, sizeof(opt));
     sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons((u_short)port);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = htonl(loopback_only ? INADDR_LOOPBACK : INADDR_ANY);
     if (::bind(s, (sockaddr*)&addr, sizeof(addr)) == SOCKET_ERROR) { if (err) *err = "bind failed"; ::closesocket(s); return 0; }
     if (::listen(s, SOMAXCONN) == SOCKET_ERROR) { if (err) *err = "listen failed"; ::closesocket(s); return 0; }
     return (sock_t)s;
@@ -52,7 +52,7 @@ sock_t make_listen(int port, std::string* err) {
     int opt = 1;
     ::setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     sockaddr_in addr{}; addr.sin_family = AF_INET; addr.sin_port = htons((u_short)port);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    addr.sin_addr.s_addr = htonl(loopback_only ? INADDR_LOOPBACK : INADDR_ANY);
     if (::bind(s, (sockaddr*)&addr, sizeof(addr)) < 0) { if (err) *err = "bind failed"; ::close(s); return 0; }
     if (::listen(s, SOMAXCONN) < 0) { if (err) *err = "listen failed"; ::close(s); return 0; }
     return (sock_t)s;
@@ -606,7 +606,7 @@ std::string build_login_url(const std::string& host_in, int port, const std::str
     return host + "/sign-in?&from=studio&source=portal&to=" + enc(callback);
 }
 
-bool start_http_server(BambuBridge& bridge, int port, bool mcp_control) {
+bool start_http_server(BambuBridge& bridge, int port, bool mcp_control, bool loopback_only) {
     g_mcp_control = mcp_control;
     g_bridge = &bridge;
     g_http_port = port;
@@ -615,7 +615,7 @@ bool start_http_server(BambuBridge& bridge, int port, bool mcp_control) {
     bridge.add_event_sink(&sink);
 
     std::string err;
-    g_listen = make_listen(port, &err);
+    g_listen = make_listen(port, loopback_only, &err);
     if (!g_listen) { std::fprintf(stderr, "[http] %s\n", err.c_str()); return false; }
 
     g_running = true;
@@ -635,7 +635,8 @@ bool start_http_server(BambuBridge& bridge, int port, bool mcp_control) {
             std::thread(handle_conn, (sock_t)c).detach();
         }
     });
-    std::fprintf(stdout, "[http] listening on 0.0.0.0:%d\n", port);
+    std::fprintf(stdout, "[http] listening on %s:%d\n", loopback_only ? "127.0.0.1" : "0.0.0.0", port);
+    std::fprintf(stdout, "[mcp] Streamable HTTP: http://127.0.0.1:%d/mcp\n", port);
     std::fflush(stdout);
     return true;
 }
