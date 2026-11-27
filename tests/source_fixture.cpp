@@ -65,6 +65,19 @@ EXPORT int Bambu_SendMessage(Bambu_Tunnel h, int type, const char* p, int size) 
         }
         return 0;
     }
+    if (t.listed && has(R"("cmdtype":2)") && !has(R"("sequence":2)")) {
+        const auto pos = req.find(R"("sequence":)");
+        if (pos == req.npos) return -1;
+        const auto start = pos + std::string_view(R"("sequence":)").size();
+        const auto seq = std::string(req.substr(start, req.find(',', start) - start));
+        const auto prefix = R"({"cmdtype":2,"sequence":)" + seq;
+        if (has("#Metadata/slice_info.config")) {
+            t.replies.push_back(prefix + R"(,"result":0,"reply":{"size":5,"path":"/cache/\u6A21\u578B.3mf#Metadata/slice_info.config"}})" "\n\nslice");
+        } else {
+            t.replies.push_back(prefix + R"(,"result":14})");
+        }
+        return 0;
+    }
     if (!t.listed || !has(R"("sequence":2)")) return -1;
     if (has(R"("cmdtype":3)")) {
         if (has(std::string(R"("paths":[")") + model_path + R"("])")) {

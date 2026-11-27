@@ -94,7 +94,8 @@ Linux：
 
 - **下载**：返回 `200 application/octet-stream`、`Content-Disposition: attachment` 和分块二进制内容，单文件上限 512 MiB。传输中断时响应没有终止块，客户端不应保存为完整文件。
 - **删除**：不提供回收站。打印机确认删除后返回 `200` 和 `{"ok":true,"result":{"deleted":true}}`。若返回 `file_delete_unconfirmed` 或请求超时，先刷新文件列表再决定是否重试。
-- **缩略图**：返回 `200 image/png` 或 `200 image/jpeg`，响应体是原始图片，不是 JSON 或 Base64。模型默认取第 1 盘，可传 `"plate":2` 指定其他盘（1–256）；延时摄影和录像使用打印机生成的预览，不接受 `plate`。没有预览时返回 `404 thumbnail_not_found`。
+- **缩略图**：默认返回 `200 image/png` 或 `200 image/jpeg`，响应体是原始图片。模型默认取第 1 盘，可传 `"plate":2` 指定其他盘（1–256）；延时摄影和录像使用打印机生成的预览，不接受 `plate`。没有预览时返回 `404 thumbnail_not_found`。
+- **缩略图和元数据**：同一个请求加 `"include_metadata":true`，改为返回 JSON。`result.thumbnail` 包含 `content_type` 和 `data_base64`；`result.file` 包含列表中该文件的字段。模型还返回 `result.model_metadata_base64`，以 3MF 内部路径为键、原始文件内容的 Base64 为值。会尝试读取 `_rels/.rels`、`3D/3dmodel.model`、`Metadata/model_settings.config`、`Metadata/slice_info.config` 和 `Metadata/project_settings.config`，单项最多 256 KiB。未能读取的成员不返回，已取得的图片和文件信息仍返回。录像和延时摄影没有 3MF 元数据。
 
 实现使用 Open Bamboo Networking 的 [BambuSource CTRL 文件浏览接口](https://github.com/ClusterM/open-bamboo-networking/blob/master/research/09.05-ctrl.md)：局域网走 TLS 6000，云端走 TUTK，不是云端打印历史。使用 Open Bamboo Networking 时，云端文件访问需要 `block_cloud = 0`、支持 TUTK CTRL 的 `BambuSource` 和用户自行提供的 slicer 证书配置。`force_ftps` 模式下，上游不提供原始缩略图，且可能不支持按旧式文件名删除；离开局域网访问也不应启用此模式。不同固件可用的存储及文件操作不同，部分机型能列出内部模型但不允许读取或删除。接口不提供上传。
 

@@ -59,6 +59,13 @@ def main(exe, plugin):
                                            json.dumps({**options, 'path': FILE, **extra}), JSON)
                 assert (code, headers['content-type'], data) == (200, 'image/png', b'\x89PNG\r\n\x1a\n')
                 assert headers['cache-control'] == 'no-store' and headers['x-content-type-options'] == 'nosniff'
+            combined = post(path + '/thumbnail', {**options, 'path': FILE, 'include_metadata': True})
+            assert combined == {
+                'thumbnail': {'content_type': 'image/png', 'data_base64': 'iVBORw0KGgo='},
+                'file': {'name': '模型.3mf', 'path': FILE, 'size': 6},
+                'model_metadata_base64': {'Metadata/slice_info.config': 'c2xpY2U='},
+            }
+            post(path + '/thumbnail', {**options, 'path': FILE, 'include_metadata': 'true'}, 400, 'invalid_body')
             post(path + '/thumbnail', {**options, 'path': FILE, 'plate': 0}, 400, 'invalid_body')
             post(path + '/thumbnail', {**options, 'path': FILE, 'plate': 3}, 502, 'storage_request_failed')
             post(path + '/thumbnail', {**options, 'path': FILE, 'plate': 4}, 404, 'thumbnail_not_found')

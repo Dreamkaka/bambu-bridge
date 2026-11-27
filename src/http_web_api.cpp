@@ -3,6 +3,7 @@
 #include "http_websocket.hpp"
 #include "camera_stream.hpp"
 #include "printer_files.hpp"
+#include "base64.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -181,7 +182,13 @@ WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, FileOpera
     const bool model_thumbnail = operation == FileOperation::thumbnail && type->str == "model";
     if (plate && (!model_thumbnail || !file_number(plate, 256) || plate->num < 1))
         return web_api_error(400, "invalid_body");
-    if (input.obj.size() != 3u + (lan ? 2u : 0u) + (select_file ? 1u : 0u) + (plate ? 1u : 0u) ||
+    const auto* details = input.find("include_metadata");
+    if (details && (operation != FileOperation::thumbnail || details->kind != Json::Bool))
+        return web_api_error(400, "invalid_body");
+    const bool include_metadata = details && details->b;
+    const size_t expected_fields = 3u + (lan ? 2u : 0u) + (select_file ? 1u : 0u) +
+                                   (plate ? 1u : 0u) + (details ? 1u : 0u);
+    if (input.obj.size() != expected_fields ||
         (select_file && ((path != nullptr) == (name != nullptr) ||
             !safe_file_ref(path ? path->str : name->str, path != nullptr))))
         return web_api_error(400, "invalid_body");
@@ -216,6 +223,7 @@ WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, FileOpera
     if (storage->str == "internal") req.set("storage", *storage);
     int printer_code = 0;
     size_t entries_seen = 0;
+    Json selected = Json::object();
     std::string filename;
     bool ambiguous = false;
     status = tunnel.request(1, std::move(req), running, [&](int code, const Json& reply, std::string_view bytes) {
@@ -231,11 +239,13 @@ WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, FileOpera
             if (!n || !safe_file_ref(n->str, false) || (has_path && !safe_file_ref(p->str, true))) continue;
             if (!has_path && type->str != "timelapse") continue; // Legacy printers may return timelapses for every type.
             if (select_file) {
-                if (has_path ? path && p->str == path->str : name && n->str == name->str) {
-                    if (!filename.empty() && filename != n->str) ambiguous = true;
-                    filename = n->str;
+                if (!(has_path ? path && p->str == path->str : name && n->str == name->str)) continue;
+                if (!filename.empty()) {
+                    if (filename != n->str) ambiguous = true;
+                    continue;
                 }
-                continue;
+                filename = n->str;
+                if (!include_metadata) continue;
             }
             Json item = Json::object();
             item.set("name", *n);
@@ -246,7 +256,8 @@ WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, FileOpera
             }
             if (const auto* date = field(entry, "date", Json::String); date && file_text(date->str, 128))
                 item.set("date", *date);
-            files.arr.push_back(std::move(item));
+            if (select_file) selected = std::move(item);
+            else files.arr.push_back(std::move(item));
         }
         return true;
     });
@@ -323,6 +334,42 @@ WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, FileOpera
         if (printer_code == 10 || printer_code == 14 || printer_code == 15 ||
             (status == FileControlStatus::ok && !image)) return web_api_error(404, "thumbnail_not_found");
         if (status != FileControlStatus::ok) return control_error(status, printer_code);
+        if (include_metadata) {
+            Json result = Json::object(), thumbnail = Json::object();
+            thumbnail.set("content_type", Json::s(image->content_type));
+            thumbnail.set("data_base64", Json::s(base64_encode(image->bytes)));
+            result.set("thumbnail", std::move(thumbnail));
+            result.set("file", std::move(selected));
+            if (model_thumbnail && path) {
+                Json metadata = Json::object();
+                // FTPS can answer a ZIP request with the entire model. Request only named members.
+                for (const char* member : {"_rels/.rels", "3D/3dmodel.model",
+                                           "Metadata/model_settings.config", "Metadata/slice_info.config",
+                                           "Metadata/project_settings.config"}) {
+                    const auto target = path->str + "#" + member;
+                    Json members = Json::array(), request = Json::object();
+                    members.arr.push_back(Json::s(target));
+                    request.set("paths", std::move(members));
+                    if (storage->str == "internal") request.set("storage", *storage);
+                    int member_code = 0;
+                    const auto member_status = tunnel.request(2, std::move(request), running,
+                        [&](int code, const Json& reply, std::string_view bytes) {
+                            member_code = code;
+                            if (code != 0) return false;
+                            const auto* returned = field(reply, "path", Json::String);
+                            const auto* size = reply.find("size");
+                            if (!returned || returned->str != target || !file_number(size, max_thumbnail_size) ||
+                                size->num != static_cast<double>(bytes.size())) return false;
+                            if (!bytes.empty()) metadata.set(member, Json::s(base64_encode(bytes)));
+                            return true;
+                        });
+                    if (member_status != FileControlStatus::ok && member_code != 10 && member_code != 14 && member_code != 15)
+                        break;
+                }
+                result.set("model_metadata_base64", std::move(metadata));
+            }
+            return success(200, std::move(result));
+        }
         return {200, {}, {}, std::move(image)};
     }
 
