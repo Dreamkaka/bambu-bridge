@@ -4,14 +4,21 @@
 #include "json.hpp"
 #include <atomic>
 #include <functional>
+#include <optional>
 #include <string_view>
 
 namespace bambu {
+
+struct WebImage {
+    const char* content_type;
+    std::string bytes;
+};
 
 struct WebApiResponse {
     int status;
     Json body;
     std::string extra_headers;
+    std::optional<WebImage> image = std::nullopt;
 };
 
 // Download callbacks are invoked only on validated chunks. A successful

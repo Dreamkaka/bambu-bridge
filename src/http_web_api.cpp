@@ -62,15 +62,21 @@ bool integer(const Json* value, int& out) {
     return true;
 }
 
-bool is_json_media_type(std::string_view type) {
+bool accepts_json_body(std::string_view type, bool allow_raw_json) {
+    if (type.empty()) return allow_raw_json;
     type = type.substr(0, type.find(';'));
     const auto start = type.find_first_not_of(" \t");
     if (start == std::string_view::npos) return false;
     type = type.substr(start, type.find_last_not_of(" \t") - start + 1);
-    constexpr std::string_view json = "application/json";
-    return type.size() == json.size() && std::equal(type.begin(), type.end(), json.begin(), [](char a, char b) {
-        return (a >= 'A' && a <= 'Z' ? a + ('a' - 'A') : a) == b;
-    });
+    const auto matches = [type](std::string_view expected) {
+        return type.size() == expected.size() && std::equal(type.begin(), type.end(), expected.begin(), [](char a, char b) {
+            return (a >= 'A' && a <= 'Z' ? a + ('a' - 'A') : a) == b;
+        });
+    };
+    // Some clients label a raw JSON body as plain text or use curl -d's default.
+    // The body must still be a JSON object, regardless of the declared type.
+    return matches("application/json") ||
+           (allow_raw_json && (matches("text/plain") || matches("application/x-www-form-urlencoded")));
 }
 
 struct ProjectedField { const char* key; Json::Kind kind; };
@@ -110,6 +116,8 @@ WebApiResponse project_printers(const std::string& body) {
 
 constexpr double max_file_size = 512 * 1024 * 1024;
 constexpr size_t max_file_count = 10000;
+constexpr size_t max_thumbnail_size = 256 * 1024;
+enum class FileOperation { list, download, remove, thumbnail };
 
 bool file_text(std::string_view text, size_t limit) {
     return !text.empty() && text.size() <= limit && websocket_utf8_valid(text) &&
@@ -156,7 +164,7 @@ WebApiResponse control_error(FileControlStatus status, int printer_code) {
     return response;
 }
 
-WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, bool download, const Json& input,
+WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, FileOperation operation, const Json& input,
                              const std::atomic<bool>& running, const WebFileSink& sink) {
     const auto* source = field(input, "source", Json::String);
     const auto* storage = field(input, "storage", Json::String);
@@ -168,8 +176,13 @@ WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, bool down
     const bool lan = source->str == "lan";
     const auto* path = field(input, "path", Json::String);
     const auto* name = field(input, "name", Json::String);
-    if (input.obj.size() != 3u + (lan ? 2u : 0u) + (download ? 1u : 0u) ||
-        (download && ((path != nullptr) == (name != nullptr) ||
+    const bool select_file = operation != FileOperation::list;
+    const auto* plate = input.find("plate");
+    const bool model_thumbnail = operation == FileOperation::thumbnail && type->str == "model";
+    if (plate && (!model_thumbnail || !file_number(plate, 256) || plate->num < 1))
+        return web_api_error(400, "invalid_body");
+    if (input.obj.size() != 3u + (lan ? 2u : 0u) + (select_file ? 1u : 0u) + (plate ? 1u : 0u) ||
+        (select_file && ((path != nullptr) == (name != nullptr) ||
             !safe_file_ref(path ? path->str : name->str, path != nullptr))))
         return web_api_error(400, "invalid_body");
 
@@ -217,7 +230,7 @@ WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, bool down
             const bool has_path = p && !p->str.empty();
             if (!n || !safe_file_ref(n->str, false) || (has_path && !safe_file_ref(p->str, true))) continue;
             if (!has_path && type->str != "timelapse") continue; // Legacy printers may return timelapses for every type.
-            if (download) {
+            if (select_file) {
                 if (has_path ? path && p->str == path->str : name && n->str == name->str) {
                     if (!filename.empty() && filename != n->str) ambiguous = true;
                     filename = n->str;
@@ -238,13 +251,80 @@ WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, bool down
         return true;
     });
     if (status != FileControlStatus::ok) return control_error(status, printer_code);
-    if (!download) {
+    if (!select_file) {
         Json result = Json::object();
         result.set("files", std::move(files));
         return success(200, std::move(result));
     }
-    // Download only files that this category and volume just advertised.
+    // Act on a single file that this category and volume just advertised.
     if (filename.empty() || ambiguous) return web_api_error(404, "file_not_found");
+
+    if (operation == FileOperation::remove) {
+        req = Json::object();
+        Json targets = Json::array();
+        targets.arr.push_back(path ? *path : *name);
+        req.set(path ? "paths" : "delete", std::move(targets));
+        if (!path && storage->str == "internal") req.set("storage", *storage);
+        bool confirmed = true;
+        status = tunnel.request(3, std::move(req), running, [&](int code, const Json& reply, std::string_view bytes) {
+            if (code != 0 && code != 1) { printer_code = code; return false; }
+            if (!bytes.empty()) return false;
+            // The FTPS backend can return result=0 with no deleted paths for a legacy name.
+            if (const auto* paths = reply.find("paths"); code == 0 && paths) {
+                if (paths->kind != Json::Array) return false;
+                confirmed = std::any_of(paths->arr.begin(), paths->arr.end(), [&](const Json& target) {
+                    return target.kind == Json::String && (path ? target.str == path->str :
+                        std::string_view(target.str).substr(target.str.find_last_of('/') + 1) == name->str);
+                });
+            }
+            return true;
+        });
+        if (status != FileControlStatus::ok) return control_error(status, printer_code);
+        if (!confirmed) return web_api_error(502, "file_delete_unconfirmed");
+        Json result = Json::object();
+        result.set("deleted", Json::boolean(true));
+        return success(200, std::move(result));
+    }
+
+    if (operation == FileOperation::thumbnail) {
+        req = Json::object();
+        Json targets = Json::array();
+        std::string member_path;
+        if (path) {
+            member_path = path->str;
+            if (model_thumbnail) {
+                member_path += "#Metadata/plate_";
+                member_path += std::to_string(plate ? static_cast<int>(plate->num) : 1);
+                member_path += ".png";
+            } else {
+                member_path += "#thumbnail";
+            }
+            targets.arr.push_back(Json::s(member_path));
+        } else {
+            targets.arr.push_back(*name);
+        }
+        req.set(path ? "paths" : "files", std::move(targets));
+        if (storage->str == "internal") req.set("storage", *storage);
+        std::optional<WebImage> image;
+        status = tunnel.request(2, std::move(req), running, [&](int code, const Json& reply, std::string_view bytes) {
+            if (code != 0) { printer_code = code; return false; }
+            const auto* size = reply.find("size");
+            if (!file_number(size, max_thumbnail_size) || size->num != static_cast<double>(bytes.size())) return false;
+            if (const auto* returned = field(reply, "path", Json::String);
+                path && returned && !returned->str.empty() && returned->str != member_path) return false;
+            if (bytes.empty()) return true;
+            // Do not send a plugin-supplied MIME type or expose arbitrary archive members.
+            const char* mime = bytes.substr(0, 8) == "\x89PNG\r\n\x1a\n" ? "image/png" :
+                               bytes.substr(0, 3) == "\xff\xd8\xff" ? "image/jpeg" : nullptr;
+            if (!mime) return false;
+            image.emplace(WebImage{mime, std::string(bytes)});
+            return true;
+        });
+        if (printer_code == 10 || printer_code == 14 || printer_code == 15 ||
+            (status == FileControlStatus::ok && !image)) return web_api_error(404, "thumbnail_not_found");
+        if (status != FileControlStatus::ok) return control_error(status, printer_code);
+        return {200, {}, {}, std::move(image)};
+    }
 
     req = Json::object();
     req.set(path ? "path" : "file", path ? *path : *name);
@@ -284,8 +364,9 @@ WebApiResponse dispatch_web_api(BambuBridge& bridge, std::string_view method, st
                                 std::string_view query, std::string_view content_type, const std::string& body,
                                 const std::atomic<bool>& running, const WebFileSink& file_sink) {
     try {
-        enum class Route { status, login_url, printers, lan, command, files, download };
+        enum class Route { status, login_url, printers, lan, command, files };
         Route route;
+        FileOperation operation = FileOperation::list;
         const char* rpc = nullptr;
         std::string_view id;
         std::string_view allow = "GET";
@@ -310,7 +391,9 @@ WebApiResponse dispatch_web_api(BambuBridge& bridge, std::string_view method, st
             else if (suffix == "/actions/resume") rpc = "resume";
             else if (suffix == "/actions/stop") rpc = "stop";
             else if (suffix == "/files") route = Route::files;
-            else if (suffix == "/files/download") route = Route::download;
+            else if (suffix == "/files/download") { route = Route::files; operation = FileOperation::download; }
+            else if (suffix == "/files/delete") { route = Route::files; operation = FileOperation::remove; }
+            else if (suffix == "/files/thumbnail") { route = Route::files; operation = FileOperation::thumbnail; }
             else return web_api_error(404, "not_found");
             allow = "POST";
         }
@@ -328,11 +411,13 @@ WebApiResponse dispatch_web_api(BambuBridge& bridge, std::string_view method, st
             if (!body.empty()) return web_api_error(400, "invalid_body");
         } else {
             if (body.size() > 4096) return web_api_error(413, "body_too_large");
-            if (!is_json_media_type(content_type)) return web_api_error(415, "unsupported_media_type");
+            const bool file_route = route == Route::files;
+            if (!accepts_json_body(content_type, file_route && operation != FileOperation::remove))
+                return web_api_error(415, "unsupported_media_type");
             Json input;
             if (!json_parse(body, &input, true) || input.kind != Json::Object) return web_api_error(400, "invalid_body");
-            if (route == Route::files || route == Route::download)
-                return printer_files(bridge, id, route == Route::download, input, running, file_sink);
+            if (file_route)
+                return printer_files(bridge, id, operation, input, running, file_sink);
             // The parser preserves duplicate object keys. Exact size plus all required keys rejects duplicates.
             if (route == Route::lan) {
                 const auto* dev = field(input, "dev_id", Json::String);

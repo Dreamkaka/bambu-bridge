@@ -1,0 +1,20 @@
+{
+  "name": "bambu-bridge-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "check": "node --experimental-strip-types src/check.ts",
+    "build": "tsc --noEmit && node --experimental-strip-types src/check.ts && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173"
+  },
+  "dependencies": {
+    "@fontsource-variable/noto-sans-sc": "^5.2.8",
+    "@fontsource-variable/saira": "^5.2.8",
+    "mpegts.js": "1.8.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}

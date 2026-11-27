@@ -1,5 +1,6 @@
 // Synthetic BambuSource companion. The bridge still dispatches HTTP and consumes the real CTRL ABI.
 #include "bambu_tunnel.hpp"
+#include <atomic>
 #include <deque>
 #include <string>
 #include <string_view>
@@ -14,15 +15,21 @@ struct Tunnel {
     bool started = false;
     bool listed = false;
     bool internal = false;
+    bool cloud = false;
     std::deque<std::string> replies;
     std::string data;
 };
+
+std::atomic<bool> model_deleted[] = {false, false};
+constexpr char model_path[] = "/cache/\xe6\xa8\xa1\xe5\x9e\x8b.3mf";
 
 EXPORT int Bambu_Create(Bambu_Tunnel* out, const char* url) {
     const std::string_view path(url);
     if (path.rfind("bambu:///local/192.0.2.10.?port=6000&user=bblp&passwd=a%26b%2Bc&device=lan-fixture", 0) != 0 &&
         path.rfind("bambu:///tutk?uid=fixture&device=", 0) != 0) return -1;
-    *out = new Tunnel();
+    auto* tunnel = new Tunnel();
+    tunnel->cloud = path.rfind("bambu:///tutk?", 0) == 0;
+    *out = tunnel;
     return Bambu_success;
 }
 EXPORT int Bambu_Open(Bambu_Tunnel) { return Bambu_success; }
@@ -43,19 +50,48 @@ EXPORT int Bambu_SendMessage(Bambu_Tunnel h, int type, const char* p, int size) 
         t.listed = true;
         t.internal = has(R"("storage":"internal")");
         t.replies.push_back(R"({"cmdtype":256,"sequence":1,"result":0})");
-        if (has(R"("type":"video")")) {
+        if (has(R"("type":"video")") && t.internal) {
+            t.replies.push_back(R"({"cmdtype":1,"sequence":1,"result":0,"reply":{"file_lists":[{"name":"clip.mp4","path":"/userdata/media/clip.mp4"}]}})");
+        } else if (has(R"("type":"video")")) {
             t.replies.push_back(R"({"cmdtype":1,"sequence":1,"result":17})");
         } else if (has(R"("type":"timelapse")")) {
             t.replies.push_back(R"({"cmdtype":1,"sequence":1,"result":0,"reply":{"file_lists":[{"name":"legacy.mp4","size":0}]}})");
         } else if (t.internal) {
             t.replies.push_back(R"({"cmdtype":1,"sequence":1,"result":0,"reply":{"file_lists":[{"name":"broken.3mf","path":"/userdata/model/broken.3mf","size":6}]}})");
         } else {
-            t.replies.push_back(R"({"cmdtype":1,"sequence":1,"result":1,"reply":{"file_lists":[{"name":"\u6A21\u578B.3mf","path":"/cache/\u6A21\u578B.3mf","size":6,"ignored":"sensitive"}]}})");
+            if (!model_deleted[t.cloud])
+                t.replies.push_back(R"({"cmdtype":1,"sequence":1,"result":1,"reply":{"file_lists":[{"name":"\u6A21\u578B.3mf","path":"/cache/\u6A21\u578B.3mf","size":6,"ignored":"sensitive"}]}})");
             t.replies.push_back(R"({"cmdtype":1,"sequence":1,"result":0,"reply":{"file_lists":[{"name":"huge.3mf","path":"/cache/huge.3mf","size":536870913}]}})");
         }
         return 0;
     }
-    if (!t.listed || !has(R"("cmdtype":4)") || !has(R"("sequence":2)")) return -1;
+    if (!t.listed || !has(R"("sequence":2)")) return -1;
+    if (has(R"("cmdtype":3)")) {
+        if (has(std::string(R"("paths":[")") + model_path + R"("])")) {
+            model_deleted[t.cloud] = true;
+            t.replies.push_back(R"({"cmdtype":3,"sequence":2,"result":0,"reply":{"paths":["/cache/\u6A21\u578B.3mf"]}})");
+        } else if (has(R"("delete":["legacy.mp4"])")) {
+            t.replies.push_back(R"({"cmdtype":3,"sequence":2,"result":0,"reply":{"paths":[]}})");
+        } else {
+            t.replies.push_back(R"({"cmdtype":3,"sequence":2,"result":5})");
+        }
+        return 0;
+    }
+    if (has(R"("cmdtype":2)")) {
+        if (has("#Metadata/plate_1.png") || has("#Metadata/plate_2.png")) {
+            t.replies.push_back(std::string(R"({"cmdtype":2,"sequence":2,"result":0,"reply":{"size":8,"mimetype":"text/html"}})" "\n\n") +
+                                "\x89PNG\r\n\x1a\n");
+        } else if (has(R"("files":["legacy.mp4"])") || has("/userdata/media/clip.mp4#thumbnail")) {
+            t.replies.push_back(std::string(R"({"cmdtype":2,"sequence":2,"result":0,"reply":{"size":4}})" "\n\n") +
+                                "\xff\xd8\xff\xd9");
+        } else if (has("#Metadata/plate_3.png")) {
+            t.replies.push_back(R"({"cmdtype":2,"sequence":2,"result":0,"reply":{"size":4,"mimetype":"image/png"}})" "\n\nhtml");
+        } else {
+            t.replies.push_back(R"({"cmdtype":2,"sequence":2,"result":14,"reply":{"size":0}})");
+        }
+        return 0;
+    }
+    if (!has(R"("cmdtype":4)")) return -1;
     if (has(R"("file":"legacy.mp4")")) {
         t.replies.push_back(R"({"cmdtype":4,"sequence":2,"result":0,"reply":{"offset":0,"size":0,"total":0}})");
     } else if (has("huge.3mf")) {

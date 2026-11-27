@@ -8,6 +8,8 @@ Bambu 云预览 **不是** 普通 RTSP / HLS。OrcaSlicer 的做法是：
 
 bambu-bridge 在第 3 步把 H264 **封装成 MPEG-TS**，用 HTTP 推出去。VLC、ffmpeg、mpegts.js 可以直接播。
 
+WebUI 的监控在概览页，详细数据页只显示遥测字段和波形。概览使用随前端打包的 mpegts.js；点击「播放监控」时才请求 `/camera.ts`。停止、切换设备、离开概览或将标签页放到后台都会释放播放器，不会轮询 `/camera.jpg` 或在失败后自动重试。
+
 **不是** RTSP 服务器，也 **不是** m3u8/HLS。`bambu:///` 不能丢进 VLC。
 
 ```

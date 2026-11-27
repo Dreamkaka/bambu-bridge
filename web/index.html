@@ -1,0 +1,59 @@
+<!doctype html>
+<!--
+  变体：夜班（lime / neutral / standard / plain / compact / calm），默认深色
+  主视觉：当前打印机的作业、温度和腔体画面，数字来自上报
+  页面类型：概览是控制台，数据、文件、设置是同一条命令栏下的阅读页
+-->
+<html lang="zh-CN" data-ef-variant="nightshift">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>概览 · Bambu Bridge</title>
+    <script>
+      try {
+        var root = document.documentElement;
+        var preset = { accent: 'lime', ground: 'plain', density: 'compact', motion: 'calm', theme: 'dark' };
+        var q = new URLSearchParams(location.search);
+        root.dataset.efVariant = q.get('variant') || 'nightshift';
+        ['accent', 'ground', 'density', 'motion'].forEach(function (key) {
+          var value = q.get(key) || preset[key];
+          if (value) root.setAttribute('data-ef-' + key, value);
+        });
+        var saved = localStorage.getItem('theme');
+        var theme = q.get('theme') || saved || preset.theme;
+        if (theme === 'dark' || theme === 'light') root.dataset.theme = theme;
+      } catch (e) {}
+    </script>
+    <meta name="theme-color" content="#191919" />
+  </head>
+  <body class="ef ef-contours">
+    <div class="ef-tri ef-in-sweep" aria-hidden="true"><i></i><i></i><i></i></div>
+    <header class="ef-cmdbar">
+      <a class="brand" href="#/overview"><span class="seal" aria-hidden="true">B</span>Bridge</a>
+      <nav aria-label="页面">
+        <a href="#/overview" data-route="overview">概览<small>Overview</small><span class="count" hidden>0</span></a>
+        <a href="#/data" data-route="data">数据<small>Data</small></a>
+        <a href="#/files" data-route="files">文件<small>Files</small></a>
+        <a href="#/settings" data-route="settings">设置<small>Settings</small></a>
+      </nav>
+      <div id="telemetry" role="group" aria-label="打印机状态与操作"></div>
+      <div class="util">
+        <span id="link">未连接</span>
+        <button class="ef-btn small" type="button" id="theme" aria-label="切换深色和浅色">深浅</button>
+      </div>
+    </header>
+    <main id="app"></main>
+    <dialog class="ef-dialog" id="confirm" aria-labelledby="confirm-title">
+      <div class="ef-panel cut-br">
+        <p class="ef-eyebrow slash">Stop</p>
+        <h2 id="confirm-title">停止当前打印？</h2>
+        <p>任务会中止，已经打完的部分留在热床上。</p>
+        <p class="ef-actions">
+          <button class="ef-btn" type="button" data-close="cancel">返回</button>
+          <button class="ef-btn go" type="button" data-close="stop">停止</button>
+        </p>
+      </div>
+    </dialog>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

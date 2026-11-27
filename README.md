@@ -134,6 +134,10 @@ docker run -d --name bambu-bridge --network host \
 
 完整字段、返回值、事件 payload、登录与控制顺序见 [docs/API.md](docs/API.md)。
 
+WebUI 概览的设备选择和连接状态位于导航栏右侧。宽度达到 1440 px 时，左栏显示画面与作业，中栏显示工具头、温控和耗材，右栏显示 Bridge、调用方和事件；1024–1439 px 时右栏移到底部，更窄时先显示作业。设备数来自 MQTT 就绪列表，不是接入 Bridge 的应用数。
+
+H3C 的完整 `pushall` 上报里，喷嘴列表位于 `payload.print.device.nozzle.info[]`，腔温位于 `device.ctc.info.temp`，风道部件位于 `device.airduct.parts[]`（后两项相对 `payload.print`）。概览按上报槽位展示，不依靠机型名称推算数量。
+
 ## 协议
 
 ### HTTP 端点

@@ -523,6 +523,11 @@ void handle_mcp(sock_t s, const std::string& method, const Headers& headers, con
 }
 
 void send_web_response(sock_t s, const WebApiResponse& response) {
+    if (response.image) {
+        send_response(s, response.status, response.image->content_type, response.image->bytes,
+                      true, "X-Content-Type-Options: nosniff\r\n");
+        return;
+    }
     send_response(s, response.status, "application/json; charset=utf-8", json_dump(response.body),
                   true, response.extra_headers.c_str());
 }
