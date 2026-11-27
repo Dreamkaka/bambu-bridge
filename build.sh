@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# build.sh — build the bridge on Linux/macOS with g++/clang++ (no CMake needed).
+# build.sh — build the bridge on Linux/macOS with g++/clang++.
 #
 #   ./build.sh                        # uses g++, output build/bambu-bridge
 #   ./build.sh --clang                # use clang++
@@ -19,12 +19,24 @@ for a in "$@"; do
     esac
 done
 
+codec_cflags=()
+pkg-config --exists openh264 libjpeg || {
+    echo '[build] Install the OpenH264 and libjpeg-turbo development packages (see README.md).' >&2
+    exit 1
+}
+read -r -a codec_cflags <<< "$(pkg-config --cflags openh264 libjpeg)"
+h264_lib="$(pkg-config --variable=libdir openh264)/libopenh264.a"
+jpeg_lib="$(pkg-config --variable=libdir libjpeg)/libjpeg.a"
+if [[ ! -f "$h264_lib" || ! -f "$jpeg_lib" ]]; then
+    echo '[build] Static OpenH264 and libjpeg archives are required.' >&2
+    exit 1
+fi
+
 mkdir -p "$(dirname "$OUT")"
 
 echo "[build] $CXX -std=$STD -> $OUT"
 "$CXX" -std="$STD" -O2 -Wall -Wextra \
-    -Iinclude -Isrc \
-    -pthread -ldl \
+    -Iinclude -Isrc "${codec_cflags[@]}" \
     src/main.cpp \
     src/bridge.cpp \
     src/plugin_loader.cpp \
@@ -33,6 +45,7 @@ echo "[build] $CXX -std=$STD -> $OUT"
     src/stdio_transport.cpp \
     src/http_server.cpp \
     src/camera_stream.cpp \
+    "$h264_lib" "$jpeg_lib" -pthread -ldl \
     -o "$OUT"
 
 echo "[build] OK: $OUT"

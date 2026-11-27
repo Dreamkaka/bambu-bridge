@@ -20,6 +20,25 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# Link snapshot codecs into the bridge; no external decoder at runtime.
+set(_bambu_library_suffixes ${CMAKE_FIND_LIBRARY_SUFFIXES})
+if(NOT MSVC)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+endif()
+find_package(JPEG REQUIRED)
+find_path(OPENH264_INCLUDE_DIR NAMES wels/codec_api.h)
+find_library(OPENH264_LIBRARY_RELEASE NAMES openh264 libopenh264.a)
+set(CMAKE_FIND_LIBRARY_SUFFIXES ${_bambu_library_suffixes})
+if(NOT OPENH264_INCLUDE_DIR OR NOT OPENH264_LIBRARY_RELEASE)
+    message(FATAL_ERROR "OpenH264 development headers and static library are required (see README.md)")
+endif()
+if(MSVC AND VCPKG_TARGET_TRIPLET)
+    find_library(OPENH264_LIBRARY_DEBUG NAMES openh264 libopenh264.a
+        PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug/lib" NO_DEFAULT_PATH)
+endif()
+include(SelectLibraryConfigurations)
+select_library_configurations(OPENH264)
+
 add_executable(bambu-bridge
     src/main.cpp
     src/bridge.cpp
@@ -62,6 +81,11 @@ if(WIN32)
 else()
     target_link_libraries(bambu-bridge-self-test PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
 endif()
+
+foreach(target bambu-bridge bambu-bridge-self-test)
+    target_include_directories(${target} PRIVATE ${OPENH264_INCLUDE_DIR})
+    target_link_libraries(${target} PRIVATE ${OPENH264_LIBRARY} JPEG::JPEG)
+endforeach()
 
 # Optional: point at your plugin directory at build time for convenience.
 set(BAMBU_PLUGIN_DIR "" CACHE PATH "Directory containing bamboo_networking(.so/.dll)")

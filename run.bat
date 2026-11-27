@@ -1,5 +1,10 @@
 @echo off
 setlocal
+if exist "%~dp0bambu-bridge.exe" (
+    "%~dp0bambu-bridge.exe" --plugin-dir "%~dp0plugins" --http 8080 %*
+    exit /b
+)
+
 set "BRIDGE=%~dp0build\bambu-bridge.exe"
 set "PLUGIN_DIR=%~dp0open_bambu_networking_plugin\bin\win_x64"
 

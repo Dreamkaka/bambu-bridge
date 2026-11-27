@@ -222,6 +222,16 @@ http://127.0.0.1:8080/camera.html?dev_id=SERIAL
 http://127.0.0.1:8080/camera.ts?dev_id=SERIAL&ip=192.168.1.10&password=ACCESS_CODE&proto=local
 ```
 
+### `GET /camera.jpg`
+
+拍摄当前摄像头的一帧，成功时返回 `200 image/jpeg`（JPEG 二进制，不是 JSON 或 Base64），且不缓存。参数与 `/camera.ts` 相同，`dev_id` 必填。
+
+```bash
+curl --fail 'http://127.0.0.1:8080/camera.jpg?dev_id=SERIAL&ip=192.168.1.10&password=ACCESS_CODE&proto=local' -o snapshot.jpg
+```
+
+MJPEG 和 H.264 都不需要 FFmpeg。失败时返回 JSON `{"ok":false,"error":"..."}`，状态码见 [相机文档](CAMERA.md)。
+
 ### `POST /api/<method>`
 
 REST 简写，等价于 `POST /rpc` 且 `method` 取路径最后一段。body 就是 `params` 对象。

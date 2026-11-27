@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cerrno>
 #include <fstream>
+#include <filesystem>
 #include <random>
 
 #if defined(_WIN32)
@@ -78,6 +79,19 @@ std::string default_home() {
     struct passwd* pw = ::getpwuid(::getuid());
     return (pw && pw->pw_dir) ? pw->pw_dir : ".";
 #endif
+}
+
+bool seed_plugin_config(const std::string& plugin_dir, const std::string& config_dir) {
+    if (plugin_dir.empty() || config_dir.empty()) return true;
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const auto source = fs::path(plugin_dir) / "obn.conf";
+    if (!fs::is_regular_file(source, ec)) return true; // Unbundled plugins may not ship defaults.
+    const fs::path dir(config_dir);
+    fs::create_directories(dir, ec);
+    if (ec) return false;
+    fs::copy_file(source, dir / "obn.conf", fs::copy_options::skip_existing, ec);
+    return !ec;
 }
 
 std::string json_field(const std::string& json, const char* key) {
@@ -287,6 +301,10 @@ int BambuBridge::init_agent(std::string* err) {
 
     if (config_dir_.empty()) config_dir_ = join2(default_home(), "bambu-bridge");
     if (log_dir_.empty()) log_dir_ = join2(config_dir_, "log");
+    if (!seed_plugin_config(plugin_dir_, config_dir_)) {
+        if (err) *err = "could not initialize obn.conf in " + config_dir_;
+        return BAMBU_NETWORK_ERR_INVALID_HANDLE;
+    }
     mkdir_p(config_dir_);
     mkdir_p(log_dir_);
 
@@ -327,8 +345,9 @@ int BambuBridge::set_country_code(const std::string& cc) {
     return fn_set_country_code(agent_, cc);
 }
 int BambuBridge::set_config_dir(const std::string& dir) {
-    config_dir_ = dir;
     if (!has_agent() || !fn_set_config_dir) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
+    if (!seed_plugin_config(plugin_dir_, dir)) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
+    config_dir_ = dir;
     return fn_set_config_dir(agent_, dir);
 }
 int BambuBridge::set_cert_file(const std::string& folder, const std::string& filename) {

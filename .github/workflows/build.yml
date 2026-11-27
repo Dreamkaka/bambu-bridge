@@ -16,29 +16,15 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install build tools
-        run: sudo apt-get update && sudo apt-get install -y g++ make cmake
+        run: sudo apt-get update && sudo apt-get install -y g++ make cmake libopenh264-dev libjpeg-turbo8-dev
 
       - name: Show toolchain
         run: g++ --version && cmake --version
 
-      # --- Build the main bridge binary ---
-      - name: Build bridge (g++)
+      - name: Build bridge and self-test
         run: |
-          mkdir -p build
-          g++ -std=c++17 -O2 -Wall -Wextra \
-              -Iinclude -Isrc -pthread -ldl \
-              src/main.cpp src/bridge.cpp src/plugin_loader.cpp src/json.cpp \
-              src/rpc_handler.cpp src/stdio_transport.cpp src/http_server.cpp src/camera_stream.cpp \
-              -o build/bambu-bridge
-
-      # --- Build the plugin-independent self-test ---
-      - name: Build self-test
-        run: |
-          g++ -std=c++17 -O2 -Wall -Wextra \
-              -Iinclude -Isrc -pthread -ldl \
-              src/self_test.cpp src/bridge.cpp src/plugin_loader.cpp src/json.cpp \
-              src/rpc_handler.cpp src/stdio_transport.cpp src/http_server.cpp src/camera_stream.cpp \
-              -o build/bambu-bridge-self-test
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --parallel
 
       # --- Run self-test (does NOT need the plugin) ---
       - name: Run self-test
@@ -55,12 +41,28 @@ jobs:
         run: |
           ./build/bambu-bridge --help >/dev/null && echo "CLI OK"
 
-      # --- Upload the Linux binary as an artifact (no plugin needed) ---
-      - name: Upload bridge binary artifact
+      - name: Include codec notices
+        run: |
+          cp /usr/share/doc/libopenh264-dev/copyright build/openh264-copyright.txt
+          cp /usr/share/doc/libjpeg-turbo8-dev/copyright build/libjpeg-turbo-copyright.txt
+
+      - name: Package bridge with Open Bamboo Networking
+        run: |
+          python3 packaging/bundle.py linux_x64 build/bambu-bridge artifacts/bambu-bridge-linux-x64 build/*-copyright.txt
+
+      - name: Smoke test packaged plugin
+        run: |
+          mkdir build/package-smoke
+          tar -xzf artifacts/bambu-bridge-linux-x64.tar.gz -C build/package-smoke
+          cfg=$(mktemp -d)
+          build/package-smoke/run.sh --config-dir "$cfg" --http 0 --stdio </dev/null
+          grep -Fx 'block_cloud = 0' "$cfg/obn.conf"
+
+      - name: Upload Linux bundle
         uses: actions/upload-artifact@v4
         with:
           name: bamboo-bridge-linux
-          path: build/bambu-bridge
+          path: artifacts/bambu-bridge-linux-x64.tar.gz
           if-no-files-found: error
 
   build-windows-msvc:
@@ -74,14 +76,36 @@ jobs:
       - name: Set up MSVC
         uses: microsoft/setup-msbuild@v2
 
+      - name: Install static camera codecs
+        run: '& "$env:VCPKG_INSTALLATION_ROOT/vcpkg.exe" install openh264:x64-windows-static-md libjpeg-turbo:x64-windows-static-md'
+
       - name: Build with MSVC (CMake)
         run: |
-          cmake -S . -B build_msvc -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build_msvc -A x64 -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
           cmake --build build_msvc --config Release --target bambu-bridge
 
-      - name: Upload Windows binary artifact
+      - name: Include codec notices
+        run: |
+          $share = "$env:VCPKG_INSTALLATION_ROOT/installed/x64-windows-static-md/share"
+          Copy-Item "$share/openh264/copyright" build_msvc/Release/openh264-copyright.txt
+          Copy-Item "$share/libjpeg-turbo/copyright" build_msvc/Release/libjpeg-turbo-copyright.txt
+
+      - name: Package bridge with Open Bamboo Networking
+        run: |
+          $release = 'build_msvc/Release'
+          python packaging/bundle.py win_x64 "$release/bambu-bridge.exe" artifacts/bambu-bridge-windows-x64 "$release/openh264-copyright.txt" "$release/libjpeg-turbo-copyright.txt"
+
+      - name: Smoke test packaged plugin
+        run: |
+          Expand-Archive artifacts/bambu-bridge-windows-x64.zip build_msvc/package-smoke
+          $cfg = Join-Path $env:RUNNER_TEMP 'bambu-bridge-smoke'
+          '{"method":"status"}' | & build_msvc/package-smoke/run.bat --config-dir $cfg --http 0 --stdio
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Select-String -Path "$cfg/obn.conf" -Pattern '^block_cloud = 0$' -Quiet)) { exit 1 }
+
+      - name: Upload Windows bundle
         uses: actions/upload-artifact@v4
         with:
           name: bamboo-bridge-windows-msvc
-          path: build_msvc/Release/bambu-bridge.exe
+          path: artifacts/bambu-bridge-windows-x64.zip
           if-no-files-found: error

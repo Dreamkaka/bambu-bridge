@@ -9,6 +9,11 @@
 #include <chrono>
 #include <thread>
 #include <algorithm>
+#include <csetjmp>
+#include <cstdio>
+
+#include <jpeglib.h>
+#include <wels/codec_api.h>
 
 namespace bambu {
 
@@ -217,6 +222,222 @@ bool is_keyframe(const unsigned char* p, size_t n) {
         if (t == 5 || t == 7) return true;
     }
     return false;
+}
+
+using Clock = std::chrono::steady_clock;
+constexpr size_t max_snapshot_size = 16 * 1024 * 1024;
+
+bool is_jpeg(const unsigned char* p, size_t n) {
+    return n >= 4 && p[0] == 0xff && p[1] == 0xd8 && p[n - 2] == 0xff && p[n - 1] == 0xd9;
+}
+
+struct SnapshotTunnel {
+    Bambu_Tunnel handle = nullptr;
+    bool opened = false;
+    ~SnapshotTunnel() {
+        if (opened) p_close(handle);
+        if (handle) p_destroy(handle);
+    }
+};
+
+// Hold the most recent in-band parameter sets if the IDR sample arrives separately.
+bool collect_h264_frame(const unsigned char* data, size_t size, bool& avcc, std::string& sps,
+                        std::string& pps, std::string& frame) {
+    const bool annexb = !avcc && looks_annexb(data, size);
+    auto next_nal = [&](size_t from) {
+        while (from + 3 < size && !(data[from] == 0 && data[from + 1] == 0 &&
+               (data[from + 2] == 1 || (data[from + 2] == 0 && data[from + 3] == 1)))) ++from;
+        return from + 3 < size ? from : size;
+    };
+    auto nal_size = [&](size_t offset) {
+        return (size_t(data[offset]) << 24) | (size_t(data[offset + 1]) << 16) |
+               (size_t(data[offset + 2]) << 8) | size_t(data[offset + 3]);
+    };
+    constexpr char start_code[] = "\0\0\0\1";
+    bool idr = false, inline_sps = false, inline_pps = false;
+    for (size_t start = 0; start < size;) {
+        size_t payload, end;
+        if (annexb) {
+            payload = start + (data[start + 2] == 1 ? 3 : 4);
+            if (payload == size) break;
+            end = next_nal(payload + 1);
+        } else {
+            if (size - start < 4) return false;
+            size_t n = nal_size(start);
+            payload = start + 4;
+            if (!n || n > size - payload) return false;
+            end = payload + n;
+        }
+        int type = data[payload] & 0x1f;
+        if ((type == 7 || type == 8) && end - payload <= 64 * 1024) {
+            auto& parameter_set = type == 7 ? sps : pps;
+            parameter_set.assign(start_code, 4).append(reinterpret_cast<const char*>(data + payload), end - payload);
+            (type == 7 ? inline_sps : inline_pps) = true;
+        }
+        if (type == 5) idr = true;
+        start = end;
+    }
+    if (!annexb && (inline_sps || inline_pps)) avcc = true;
+    if (!idr || sps.empty() || pps.empty()) return false;
+    size_t prefix = inline_sps && inline_pps ? 0 : sps.size() + pps.size();
+    frame.reserve(prefix + size);
+    if (prefix) frame.append(sps).append(pps);
+    frame.append(reinterpret_cast<const char*>(data), size);
+    if (!annexb) {
+        for (size_t offset = 0; offset < size; offset += 4 + nal_size(offset))
+            std::memcpy(frame.data() + prefix + offset, start_code, 4);
+    }
+    return true;
+}
+
+struct H264Decoder {
+    ISVCDecoder* handle = nullptr;
+    ~H264Decoder() {
+        if (handle) {
+            handle->Uninitialize();
+            WelsDestroyDecoder(handle);
+        }
+    }
+};
+
+struct JpegError {
+    jpeg_error_mgr manager;
+    std::jmp_buf jump;
+};
+
+struct JpegDestination {
+    jpeg_destination_mgr manager{};
+    std::string* output;
+    JOCTET buffer[4096];
+    bool failed = false;
+
+    explicit JpegDestination(std::string& jpeg) : output(&jpeg) {}
+
+    bool append(size_t n) noexcept {
+        if (n > max_snapshot_size - output->size()) return false;
+        try {
+            output->append(reinterpret_cast<const char*>(buffer), n);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    void reset() {
+        manager.next_output_byte = buffer;
+        manager.free_in_buffer = sizeof(buffer);
+    }
+};
+
+struct JpegEncoder {
+    jpeg_compress_struct codec{};
+    JpegError error{};
+    JpegDestination destination;
+    explicit JpegEncoder(std::string& jpeg) : destination(jpeg) {}
+    ~JpegEncoder() { jpeg_destroy_compress(&codec); }
+};
+
+// Keep libjpeg's longjmp inside this C-style call. The caller owns all resources.
+bool encode_i420(JpegEncoder& encoder, JSAMPLE* edge_rows,
+                 unsigned char* const planes[3], const SSysMEMBuffer& image) {
+    auto& c = encoder.codec;
+    auto& dest = encoder.destination;
+    dest.manager.init_destination = [](j_compress_ptr ctx) {
+        reinterpret_cast<JpegDestination*>(ctx->dest)->reset();
+    };
+    dest.manager.empty_output_buffer = [](j_compress_ptr ctx) -> boolean {
+        auto& d = *reinterpret_cast<JpegDestination*>(ctx->dest);
+        if (!d.append(sizeof(d.buffer))) return FALSE;
+        d.reset();
+        return TRUE;
+    };
+    dest.manager.term_destination = [](j_compress_ptr ctx) {
+        auto& d = *reinterpret_cast<JpegDestination*>(ctx->dest);
+        d.failed = !d.append(sizeof(d.buffer) - d.manager.free_in_buffer);
+    };
+    c.err = jpeg_std_error(&encoder.error.manager);
+    c.client_data = &encoder.error;
+    c.err->error_exit = [](j_common_ptr ctx) {
+        std::longjmp(static_cast<JpegError*>(ctx->client_data)->jump, 1);
+    };
+    if (setjmp(encoder.error.jump)) return false;
+    jpeg_create_compress(&c);
+    c.dest = &dest.manager;
+    c.image_width = image.iWidth;
+    c.image_height = image.iHeight;
+    c.input_components = 3;
+    c.in_color_space = JCS_YCbCr;
+    jpeg_set_defaults(&c);
+    jpeg_set_quality(&c, 85, TRUE);
+    c.raw_data_in = TRUE;
+    jpeg_start_compress(&c, TRUE);
+    // Pass decoded planes directly. Only copy rows when a cropped width needs padding.
+    while (c.next_scanline < c.image_height) {
+        JSAMPROW rows[3][16];
+        JSAMPARRAY batch[3] = {rows[0], rows[1], rows[2]};
+        auto* edge = edge_rows;
+        for (int p = 0; p < 3; ++p) {
+            const int scale = p == 0 ? 1 : 2;
+            const int width = (image.iWidth + scale - 1) / scale;
+            const int height = (image.iHeight + scale - 1) / scale;
+            const int padded = c.comp_info[p].width_in_blocks * DCTSIZE;
+            for (int i = 0; i < 16 / scale; ++i) {
+                int y = std::min(static_cast<int>(c.next_scanline) / scale + i, height - 1);
+                auto* src = planes[p] + y * image.iStride[p != 0];
+                rows[p][i] = src;
+                if (padded > width) {
+                    std::memcpy(edge, src, width);
+                    std::fill(edge + width, edge + padded, src[width - 1]);
+                    rows[p][i] = edge;
+                    edge += padded;
+                }
+            }
+        }
+        if (jpeg_write_raw_data(&c, batch, 16) != 16) return false;
+    }
+    jpeg_finish_compress(&c);
+    return !dest.failed;
+}
+
+SnapshotStatus convert_h264_snapshot(const std::string& frame, std::string& jpeg, std::string& err) {
+    H264Decoder decoder;
+    if (WelsCreateDecoder(&decoder.handle) != 0 || !decoder.handle) {
+        err = "could not create H.264 decoder";
+        return SnapshotStatus::failed;
+    }
+    SDecodingParam options{};
+    options.sVideoProperty.eVideoBsType = VIDEO_BITSTREAM_AVC;
+    options.eEcActiveIdc = ERROR_CON_DISABLE;
+    if (decoder.handle->Initialize(&options) != 0) {
+        err = "could not initialize H.264 decoder";
+        return SnapshotStatus::failed;
+    }
+    unsigned char* planes[3]{};
+    SBufferInfo decoded{};
+    auto status = decoder.handle->DecodeFrameNoDelay(reinterpret_cast<const unsigned char*>(frame.data()),
+                                                    static_cast<int>(frame.size()), planes, &decoded);
+    // Main/High streams can queue the decoded IDR for display reordering.
+    if (status == dsErrorFree && decoded.iBufferStatus == 0)
+        status = decoder.handle->FlushFrame(planes, &decoded);
+    const auto& image = decoded.UsrData.sSystemBuffer;
+    if (status != dsErrorFree || decoded.iBufferStatus != 1 || image.iFormat != videoFormatI420 ||
+        image.iWidth <= 0 || image.iHeight <= 0 || image.iWidth > 8192 || image.iHeight > 8192 ||
+        static_cast<size_t>(image.iWidth) * image.iHeight > 16 * 1024 * 1024 ||
+        image.iStride[0] < image.iWidth || image.iStride[1] < (image.iWidth + 1) / 2 ||
+        !planes[0] || !planes[1] || !planes[2]) {
+        err = "could not decode H.264 camera frame";
+        return SnapshotStatus::failed;
+    }
+    std::vector<JSAMPLE> edge_rows;
+    if (image.iWidth % 16) edge_rows.resize(((image.iWidth + 15) & ~15) * 24);
+    jpeg.clear();
+    JpegEncoder encoder(jpeg);
+    if (!encode_i420(encoder, edge_rows.data(), planes, image)) {
+        jpeg.clear();
+        err = "could not encode camera frame as JPEG";
+        return SnapshotStatus::failed;
+    }
+    return SnapshotStatus::ok;
 }
 
 } // namespace
@@ -515,6 +736,82 @@ int stream_camera_mpegts(const std::string& bambu_url, const std::atomic<bool>& 
     p_close(tnl);
     p_destroy(tnl);
     return 0;
+}
+
+SnapshotStatus capture_camera_jpeg(const std::string& bambu_url, std::string& jpeg, std::string& err) {
+    if (!camera_source_ready()) {
+        err = "BambuSource not loaded";
+        return SnapshotStatus::unavailable;
+    }
+    std::string frame;
+    {
+        auto deadline = Clock::now() + std::chrono::seconds(12);
+        SnapshotTunnel tunnel;
+        if (p_create(&tunnel.handle, bambu_url.c_str()) != Bambu_success || !tunnel.handle) {
+            err = "Bambu_Create failed";
+            return SnapshotStatus::failed;
+        }
+        if (p_set_logger) p_set_logger(tunnel.handle, bambu_log, nullptr);
+        if (p_open(tunnel.handle) != Bambu_success) {
+            err = "Bambu_Open failed";
+            return SnapshotStatus::failed;
+        }
+        tunnel.opened = true;
+        auto start = [&](auto call) {
+            while (Clock::now() < deadline) {
+                int rc = call();
+                if (rc != Bambu_would_block) return rc;
+                sleep_ms(100);
+            }
+            return static_cast<int>(Bambu_would_block);
+        };
+        int rc = start([&] { return p_start(tunnel.handle, true); });
+        if (rc != Bambu_success && rc != Bambu_would_block && p_start_ex)
+            rc = start([&] { return p_start_ex(tunnel.handle, 1); });
+        if (rc != Bambu_success) {
+            err = rc == Bambu_would_block ? "camera stream startup timed out"
+                                       : "Bambu_StartStream failed: " + std::to_string(rc);
+            return rc == Bambu_would_block ? SnapshotStatus::timeout : SnapshotStatus::failed;
+        }
+        int video_track = -1;
+        if (p_info) {
+            int count = p_count ? p_count(tunnel.handle) : 1;
+            for (int i = 0; i < count; ++i) {
+                Bambu_StreamInfo info{};
+                if (p_info(tunnel.handle, i, &info) == Bambu_success && info.type == VIDE) {
+                    video_track = i;
+                    break;
+                }
+            }
+        }
+        bool avcc = false;
+        std::string sps, pps;
+        while (Clock::now() < deadline) {
+            Bambu_Sample sample{};
+            rc = p_read(tunnel.handle, &sample);
+            if (rc == Bambu_would_block) {
+                sleep_ms(20);
+                continue;
+            }
+            if (rc != Bambu_success) {
+                err = rc == Bambu_stream_end ? "camera stream ended before a frame was captured"
+                                            : "Bambu_ReadSample failed: " + std::to_string(rc);
+                return SnapshotStatus::failed;
+            }
+            if ((video_track >= 0 && sample.itrack != video_track) || !sample.buffer ||
+                sample.size <= 0 || static_cast<size_t>(sample.size) > max_snapshot_size) continue;
+            if (is_jpeg(sample.buffer, sample.size)) {
+                jpeg.assign(reinterpret_cast<const char*>(sample.buffer), sample.size);
+                return SnapshotStatus::ok;
+            }
+            if (collect_h264_frame(sample.buffer, sample.size, avcc, sps, pps, frame)) break;
+        }
+        if (frame.empty()) {
+            err = "timed out waiting for a camera frame";
+            return SnapshotStatus::timeout;
+        }
+    } // Release the camera before running the decoder.
+    return convert_h264_snapshot(frame, jpeg, err);
 }
 
 } // namespace bambu

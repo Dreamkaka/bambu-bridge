@@ -1,6 +1,6 @@
 # Bambu Bridge — 跨平台 Bambu 网络插件封装进程
 
-把 Bambu 网络插件封装成**一个独立进程**，通过 **HTTP/REST JSON** 和 **stdio JSON-RPC** 对外提供接口。下面的运行示例使用项目内的 `open_bambu_networking_plugin`，无需另找官方插件目录。
+把 Bambu 网络插件封装成**一个独立进程**，通过 **HTTP/REST JSON** 和 **stdio JSON-RPC** 对外提供接口。GitHub Actions 的 Windows x64 和 Linux x64 产物已随包提供 Open Bamboo Networking 插件。
 
 完整接口见 **[docs/API.md](docs/API.md)**，RPC 参数见 **[docs/RPC.md](docs/RPC.md)**，摄像头见 **[docs/CAMERA.md](docs/CAMERA.md)**，AMS 见 **[docs/AMS.md](docs/AMS.md)**。
 
@@ -65,10 +65,14 @@ bambu-bridge/
 
 ## 构建
 
+截图编解码使用静态链接的 OpenH264 和 libjpeg-turbo，只在编译时安装；运行不需要 FFmpeg 或额外的编解码库。
+
 ### Linux / macOS（用 g++）
 
 ```bash
-cd bamboo-bridge
+# Debian / Ubuntu
+sudo apt install g++ cmake pkg-config libopenh264-dev libjpeg-dev
+# macOS: brew install cmake pkg-config openh264 jpeg-turbo
 ./build.sh                     # 产物 build/bambu-bridge
 # 或用 CMake
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -77,41 +81,43 @@ cmake --build build --target bambu-bridge
 
 ### Windows（必须 MSVC）
 
-用 VS 开发者命令行（`cl.exe`）：
+在 VS 开发者命令行中，用 vcpkg 的 `x64-windows-static-md` 构建（编解码器静态链接，MSVC 运行库保持动态链接以兼容插件）。先设置 `VCPKG_ROOT` 为 vcpkg 安装目录：
 
 ```bat
+"%VCPKG_ROOT%\vcpkg.exe" install openh264:x64-windows-static-md libjpeg-turbo:x64-windows-static-md
+cmake -S . -B build_msvc -A x64 -DCMAKE_TOOLCHAIN_FILE="%VCPKG_ROOT%/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md
+cmake --build build_msvc --config Release --target bambu-bridge
 if not exist build mkdir build
-cl /std:c++17 /EHsc /MD /O2 /Iinclude /Isrc ^
-   /D_WIN32_WINNT=0x0601 /DNOMINMAX ^
-   src\main.cpp src\bridge.cpp src\plugin_loader.cpp src\json.cpp ^
-   src\rpc_handler.cpp src\stdio_transport.cpp src\http_server.cpp src\camera_stream.cpp ^
-   ws2_32.lib ^
-   /Fe:build\bambu-bridge.exe
+copy /Y build_msvc\Release\bambu-bridge.exe build\bambu-bridge.exe
 ```
 
-（MinGW：`build.bat`，能编译但调用 Windows DLL 会因 ABI 不匹配而失败，仅供验证框架。）
+MinGW 仅供验证编译：设置 `CODEC_PREFIX` 为含有 `include` 和静态库 `lib/libopenh264.a`、`lib/libjpeg.a` 的 MinGW 安装前缀，再运行 `build.bat`。MinGW 产物不能调用 MSVC 构建的 Bambu 插件。
+
+This software is based in part on the work of the Independent JPEG Group.
 
 ---
 
 ## 运行
 
-Windows x64（先用 x64 MSVC 重新编译，不要用旧的 MinGW 产物）：
+从 GitHub Actions 下载对应平台的产物，解开外层 artifact 及内层 `.zip`（Windows）或 `.tar.gz`（Linux）。保留可执行文件旁的 `plugins/`；启动脚本会传入随包插件目录，无需另装插件或手填 `--plugin-dir`。
+
+Windows x64：
 
 ```bat
 run.bat
 ```
 
-`run.bat` 自动定位 Windows x64 插件和 exe，默认启动 HTTP（TCP `8080`），不启用 stdio。用 `run.bat --http 8081` 换端口，用 `run.bat --http 0 --stdio` 只开 stdio。直接启动 exe 时仍需显式传 `--plugin-dir` 和 `--http` 才会启用 HTTP。
+`run.bat` 默认只启动 HTTP（TCP `8080`）。用 `run.bat --http 8081` 换端口，用 `run.bat --http 0 --stdio` 只开 stdio。从源码构建时，它仍可使用源码目录下的 `open_bambu_networking_plugin`。
 
 Linux x64：
 
 ```bash
-./build/bambu-bridge --plugin-dir ./open_bambu_networking_plugin/bin/linux_x64 --country CN --http 8080 --no-stdio
+./run.sh --country CN
 ```
 
-其他平台直接通过 `--plugin-dir` 指向 `open_bambu_networking_plugin/bin` 下与操作系统及 bridge 架构匹配的目录。主库和同目录的 `BambuSource`、`live555` 一起使用，不要混用旧插件文件。
+需要替换插件或直接调用可执行文件时，传入 `--plugin-dir <目录>`。随包插件固定为 Open Bamboo Networking `v0.2.65`，包含 `BambuSource`、`live555`、AGPL 许可和对应源码链接（`plugins/SOURCE.txt`）。
 
-**云连接**：如果插件日志出现 `blocked by block_cloud`，在 bridge 的配置目录（`--config-dir`，Windows 默认 `%APPDATA%\bambu-bridge`）里的 `obn.conf` 将 `block_cloud` 设为 `0`，然后重启。`--country` 要和账号区域匹配，登录后再检查 `is_server_connected`；`/health` 只验证进程和 agent 状态，不代表云已连通。
+**云连接**：随包的 `plugins/obn.conf` 设置 `block_cloud = 0`。Bridge 只在用户配置文件不存在时复制该默认值，不覆盖已有配置。已有安装如需允许云连接，将配置目录（`--config-dir`，Windows 默认 `%APPDATA%\bambu-bridge`，Linux 默认 `~/bambu-bridge`）中的 `obn.conf` 改为 `block_cloud = 0` 后重启。若要阻止云连接，设为 `1`。允许云连接不等于已登录；`--country` 要和账号区域匹配。
 
 ---
 
@@ -132,6 +138,7 @@ Linux x64：
 | `GET /events` | SSE 事件流，推送插件异步事件（MQTT 消息、登录态、进度） |
 | `GET /camera.ts?dev_id=` | BambuSource 转 MPEG-TS 直播，VLC / ffmpeg / mpegts.js 可播 |
 | `GET /camera.html?dev_id=` | 浏览器预览页 |
+| `GET /camera.jpg?dev_id=` | 拍摄一帧并返回 JPEG，无需 FFmpeg（[相机文档](docs/CAMERA.md)） |
 
 ### stdio JSON-RPC
 

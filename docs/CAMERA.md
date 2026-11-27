@@ -123,6 +123,21 @@ http://127.0.0.1:8080/camera.html?dev_id=SERIAL&ip=192.168.1.10&password=1234567
 
 失败时（缺 `dev_id`、换 URL 失败、没 BambuSource）返回 JSON：`{"ok":false,"error":"..."}`，不是 TS。
 
+### `GET /camera.jpg`
+
+每次请求打开摄像头，取一帧后关闭，不需要先开启直播。成功返回 `200`、`Content-Type: image/jpeg` 和 `Cache-Control: no-store`，响应体为 JPEG 文件内容。
+
+使用与 `/camera.ts` 相同的参数：`dev_id` 必填；提供 `ip` 时走局域网，否则走云端（需先登录）。仅提供 BRTC/WebRTC 播放地址的云端摄像头不支持此接口，可尝试 LAN。
+
+```bash
+curl --fail 'http://127.0.0.1:8080/camera.jpg?dev_id=SERIAL' -o snapshot.jpg
+curl --fail 'http://127.0.0.1:8080/camera.jpg?dev_id=SERIAL&ip=192.168.1.10&password=ACCESS_CODE&proto=local' -o snapshot.jpg
+```
+
+MJPEG 摄像头直接返回原始 JPEG；H.264 摄像头等待可独立解码的关键帧，由 bridge 在进程内解码并编码成 JPEG。两种模式均不需要 FFmpeg。
+
+失败时返回 `application/json`（`{"ok":false,"error":"..."}`）：`400` 缺少 `dev_id`，`502` 相机连接或编解码失败，`503` 缺少 BambuSource，`504` 等待取帧超时。
+
 ---
 
 ## 播放器

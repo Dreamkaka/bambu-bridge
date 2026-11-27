@@ -40,6 +40,9 @@ using ByteSink = std::function<bool(const unsigned char* data, size_t n)>;
 int stream_camera_mpegts(const std::string& bambu_url, const std::atomic<bool>& running,
                          ByteSink sink, std::string* err);
 
+enum class SnapshotStatus { ok, failed, unavailable, timeout };
+SnapshotStatus capture_camera_jpeg(const std::string& bambu_url, std::string& jpeg, std::string& err);
+
 } // namespace bambu
 
 #endif

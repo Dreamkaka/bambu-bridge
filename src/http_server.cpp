@@ -115,25 +115,34 @@ bool read_request(sock_t s, std::string* first_line, std::string* body) {
     return true;
 }
 
-void send_all(sock_t s, const std::string& data) {
+bool send_all(sock_t s, const std::string& data) {
     size_t off = 0;
     while (off < data.size()) {
 #if defined(_WIN32)
         int n = ::send((SOCKET)s, data.data() + off, (int)(data.size() - off), 0);
 #else
+#  ifdef MSG_NOSIGNAL
+        int n = ::send((int)s, data.data() + off, data.size() - off, MSG_NOSIGNAL);
+#  else
         int n = ::send((int)s, data.data() + off, data.size() - off, 0);
+#  endif
 #endif
-        if (n <= 0) break;
+        if (n <= 0) return false;
         off += n;
     }
+    return true;
 }
 
-void send_response(sock_t s, int status, const std::string& ct, const std::string& body) {
-    std::string hdr = "HTTP/1.1 " + std::to_string(status) + " OK\r\n"
+void send_response(sock_t s, int status, const std::string& ct, const std::string& body, bool no_store = false) {
+    const char* reason = status == 400 ? "Bad Request" : status == 502 ? "Bad Gateway"
+                       : status == 503 ? "Service Unavailable" : status == 504 ? "Gateway Timeout"
+                       : status == 404 ? "Not Found" : "OK";
+    std::string hdr = "HTTP/1.1 " + std::to_string(status) + " " + reason + "\r\n"
                       "Content-Type: " + ct + "\r\n"
-                      "Content-Length: " + std::to_string(body.size()) + "\r\n"
-                      "Connection: close\r\n\r\n";
-    send_all(s, hdr + body);
+                      "Content-Length: " + std::to_string(body.size()) + "\r\n";
+    if (no_store) hdr += "Cache-Control: no-store\r\n";
+    hdr += "Connection: close\r\n\r\n";
+    if (send_all(s, hdr)) send_all(s, body);
 }
 
 // ---- runtime state ---------------------------------------------------------
@@ -369,17 +378,25 @@ void handle_conn(sock_t s) {
         return;
     }
 
-    if ((path == "/camera.ts" || path == "/camera") && method == "GET" && g_bridge) {
+    const bool snapshot = path == "/camera.jpg";
+    if ((snapshot || path == "/camera.ts" || path == "/camera") && method == "GET" && g_bridge) {
+        auto camera_error = [&](int status, const std::string& message) {
+            Json r = Json::object();
+            r.set("ok", Json::boolean(false));
+            r.set("error", Json::s(message));
+            send_response(s, snapshot ? status : 200, "application/json", json_dump(r), snapshot);
+            close_sock(s);
+        };
         std::string dev = url_query_param(query, "dev_id");
         if (dev.empty()) {
-            send_response(s, 200, "application/json",
-                          "{\"ok\":false,\"error\":\"missing dev_id\"}");
-            close_sock(s);
+            camera_error(400, "missing dev_id");
             return;
         }
         std::string cam_err;
-        if (!camera_source_ready())
-            load_camera_source(g_bridge->plugin_dir(), &cam_err);
+        if (!camera_source_ready() && !load_camera_source(g_bridge->plugin_dir(), &cam_err) && snapshot) {
+            camera_error(503, "BambuSource not loaded");
+            return;
+        }
         std::string cam_kind;
         std::string url = resolve_camera_url(*g_bridge, dev,
                                             url_query_param(query, "protocols"),
@@ -390,14 +407,14 @@ void handle_conn(sock_t s) {
                                             url_query_param(query, "dev_ver"),
                                             &cam_err, &cam_kind);
         if (url.empty()) {
-            Json r = Json::object();
-            r.set("ok", Json::boolean(false));
-            r.set("error", Json::s(cam_err.empty() ? "resolve camera url failed" : cam_err));
-            send_response(s, 200, "application/json", json_dump(r));
-            close_sock(s);
+            camera_error(502, snapshot || cam_err.empty() ? "resolve camera URL failed" : cam_err);
             return;
         }
         if (url.rfind("bambu:///", 0) != 0) {
+            if (snapshot) {
+                camera_error(502, "BRTC/WebRTC URL is not supported for snapshots; try LAN");
+                return;
+            }
             Json r = Json::object();
             r.set("ok", Json::boolean(true));
             r.set("kind", Json::s(cam_kind.empty() ? "brtc" : cam_kind));
@@ -405,6 +422,18 @@ void handle_conn(sock_t s) {
             r.set("error", Json::s("cloud liveview is BRTC/WebRTC; this URL is not MPEG-TS. Use LAN proto=local or a WebRTC client"));
             send_response(s, 200, "application/json", json_dump(r));
             close_sock(s);
+            return;
+        }
+        if (snapshot) {
+            std::string jpeg;
+            auto status = capture_camera_jpeg(url, jpeg, cam_err);
+            if (status == SnapshotStatus::ok) {
+                send_response(s, 200, "image/jpeg", jpeg, true);
+                close_sock(s);
+            } else {
+                camera_error(status == SnapshotStatus::unavailable ? 503 :
+                             status == SnapshotStatus::timeout ? 504 : 502, cam_err);
+            }
             return;
         }
         std::string hdr =
@@ -517,6 +546,10 @@ bool start_http_server(BambuBridge& bridge, int port) {
 #else
             int c = ::accept((int)g_listen, nullptr, nullptr);
             if (c < 0) { std::this_thread::sleep_for(std::chrono::milliseconds(50)); continue; }
+#  ifdef SO_NOSIGPIPE
+            int no_sigpipe = 1;
+            ::setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe));
+#  endif
 #endif
             std::thread(handle_conn, (sock_t)c).detach();
         }

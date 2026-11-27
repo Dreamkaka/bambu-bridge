@@ -14,6 +14,7 @@
 //   GET  /events       -> Server-Sent Events stream of async plugin events.
 //   POST /api/<method> body is params; waits for printer payload on control cmds.
 //   GET  /camera.ts    MPEG-TS remux of BambuSource H264 (VLC/ffmpeg/mpegts.js).
+//   GET  /camera.jpg   Single JPEG frame from BambuSource.
 //
 // Implemented with raw sockets so it builds with g++/MinGW/MSVC; the only
 // platform difference is Winsock init on Windows (handled in main via

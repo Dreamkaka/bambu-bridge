@@ -15,16 +15,21 @@ setlocal
 set CXX=%1
 if "%CXX%"=="" set CXX=g++
 
+if not defined CODEC_PREFIX (
+    >&2 echo [build] Set CODEC_PREFIX to the MinGW prefix with the static OpenH264 and libjpeg libraries.
+    exit /b 1
+)
+
 set OUT=build\bambu-bridge.exe
 
 if not exist build mkdir build
 
 echo [build] %CXX% -std=c++17 -> %OUT%
 %CXX% -std=c++17 -O2 -Wall -Wextra ^
-    -Iinclude -Isrc ^
+    -Iinclude -Isrc -I"%CODEC_PREFIX%\include" ^
     src\main.cpp src\bridge.cpp src\plugin_loader.cpp src\json.cpp ^
     src\rpc_handler.cpp src\stdio_transport.cpp src\http_server.cpp src\camera_stream.cpp ^
-    -lws2_32 ^
+    "%CODEC_PREFIX%\lib\libopenh264.a" "%CODEC_PREFIX%\lib\libjpeg.a" -lws2_32 ^
     -o %OUT%
 
 if errorlevel 1 ( echo [build] FAILED & exit /b 1 )
