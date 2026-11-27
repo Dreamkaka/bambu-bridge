@@ -70,6 +70,8 @@ Linux：
 
 连接 `ws://localhost:8080/api/v1/ws` 后等待首帧 `{"event":"ready","payload":{}}`，再读 `/status` 和 `/printers`，并刷新当前关注的设备。事件包括 `printer_status`（按 `dev_id`、`source` 过滤，`report` 可能只是增量）、`account_changed`、`login_result`、`cloud_connection`、`lan_connection`（`status:0` 表示已连接）。不重放历史，不因连接 WebSocket 增删 MQTT 订阅。断线后将旧设备状态标记为未确认，重连后重新读取和刷新。相机仍用现有 HTTP 接口。
 
+浏览器界面在 [`web/`](../web/)。`--web-api` 时，若当前工作目录、可执行文件所在目录，或其上一级目录中存在 `web/dist/index.html`（在 `web/` 里执行 `npm run build`），`GET /` 返回这个界面；查询里带 `ticket` 时仍走登录回调。开发时在 `web/` 执行 `npm run dev`，由 Vite 把 `/api`、`/camera.jpg`、`/camera.ts`、`/camera.html` 和 `/camera` 转发到 `http://127.0.0.1:8080`（可用环境变量 `BAMBU_BRIDGE` 改目标）。转发会改写 `Host` 与 `Origin`，否则本机接口会拒绝。Vite 只监听 `127.0.0.1`。
+
 
 证书是 OrcaSlicer 自带的 DigiCert 公钥证书，用于插件校验 `*.bambulab.com` HTTPS，**不需要也不应该去偷任何私钥**。
 

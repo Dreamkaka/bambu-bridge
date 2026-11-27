@@ -1,0 +1,175 @@
+main {
+  max-width: 88rem;
+  margin-inline: auto;
+  padding: clamp(1.25rem, 3vw, 2.25rem) var(--ef-pad) 4rem;
+}
+
+#app {
+  display: grid;
+  gap: 1.25rem;
+}
+
+.board { container: board / inline-size; }
+.orbit {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: 1.25rem;
+}
+.hub {
+  grid-column: 1 / -1;
+  justify-self: center;
+  width: min(100%, 34rem);
+  margin: 0;
+}
+@container board (max-width: 61.99rem) {
+  .orbit .ef-panel::after { display: none; }
+}
+.l1 .ef-figs b,
+.r1 .ef-figs b {
+  font-size: clamp(1.6rem, 2.2vw, 2.4rem);
+}
+@container board (min-width: 62rem) {
+  .orbit {
+    --gap: clamp(1.25rem, 3cqi, 2.5rem);
+    grid-template-columns: minmax(0, 1fr) clamp(26rem, 42cqi, 34rem) minmax(0, 1fr);
+    grid-template-rows: repeat(3, auto);
+    align-items: stretch;
+    gap: 1.25rem var(--gap);
+  }
+  .hub { grid-column: 2; grid-row: 1 / 4; align-self: center; width: 100%; }
+  .l1, .l2, .l3 { grid-column: 1; }
+  .r1, .r2, .r3 { grid-column: 3; }
+  .l1, .r1 { grid-row: 1; }
+  .l2, .r2 { grid-row: 2; }
+  .l3, .r3 { grid-row: 3; }
+  .l1, .l3 { margin-right: -1rem; }
+  .r1, .r3 { margin-left: -1rem; }
+  .l2 { margin: 0 1.75rem 0 -0.75rem; --lead: calc(1.75rem + var(--gap) + 0.4rem); }
+  .r2 { margin: 0 -0.75rem 0 1.75rem; --lead: calc(1.75rem + var(--gap) + 0.4rem); }
+}
+.cols {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(18rem, 2fr);
+  align-items: start;
+  gap: 1.25rem;
+}
+.cols .form-grid { max-width: none; }
+@media (max-width: 860px) {
+  .cols { grid-template-columns: 1fr; }
+}
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.75rem;
+  margin: 0.7rem 0 0.4rem;
+}
+.key {
+  display: inline-block;
+  width: 1.4rem;
+  height: 0;
+  border-top: 2px solid var(--ef-ink);
+  vertical-align: middle;
+}
+.key.dash { border-top-style: dashed; }
+.trace-chart {
+  display: block;
+  width: 100%;
+  height: 7.5rem;
+  margin-top: 0.35rem;
+  color: var(--ef-ink);
+  border-bottom: 1px solid var(--ef-ink);
+}
+.trace-chart .line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+}
+.trace-chart .line.bed { stroke-dasharray: 5 4; }
+.trace-chart .dot { fill: currentColor; }
+.trace-chart .dot.bed { fill: var(--ef-ink-2); }
+.trace-chart .dot.is-alert { fill: var(--ef-signal); }
+.trace-chart .axis {
+  fill: var(--ef-ink-2);
+  font-size: 11px;
+  font-stretch: var(--ef-wide);
+}
+.trace-chart.is-stale,
+.chart-bars.is-stale { opacity: 0.55; }
+.chart-bars {
+  height: 6.5rem;
+  margin: 0.6rem 0 1.4rem;
+}
+.task-file {
+  margin: 0.2rem 0 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.badges {
+  display: inline-flex;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.form-grid {
+  max-width: 36rem;
+}
+
+.ef-actions {
+  flex-wrap: wrap;
+}
+
+#source,
+#proto {
+  margin: 0.4rem 0 0.8rem;
+}
+
+a.ef-record[aria-current='true']::before {
+  transform: none;
+}
+
+.frame {
+  min-height: 12rem;
+  background: var(--ef-chip);
+}
+
+.frame :is(img, video) {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  background: var(--ef-chip);
+}
+
+.ef-cmdbar .ef-state {
+  color: #ededed;
+}
+.ef-cmdbar .ef-state.is-alert {
+  color: var(--ef-on-signal);
+}
+.ef-cmdbar .ef-state.is-draft {
+  color: #ededed;
+  border-color: #ededed;
+}
+.swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-right: 0.35rem;
+  border: 1px solid var(--ef-ink);
+  vertical-align: -0.05em;
+}
+
+.tray + .tray {
+  margin-left: 0.75rem;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (max-width: 800px) {
+  .hub { width: min(100%, 28rem); }
+}

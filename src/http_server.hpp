@@ -12,6 +12,7 @@
 //                      -> 200 {"ok":false,"error":"..."}
 //   GET  /health       -> 200 {"ok":true,"version":"...","loaded":true}
 //   GET  /events       -> Server-Sent Events stream of async plugin events.
+//   GET  /             built web/dist console when --web-api finds index.html
 //   POST /api/<method> body is params; waits for printer payload on control cmds.
 //   GET  /camera.ts    MPEG-TS remux of BambuSource H264 (VLC/ffmpeg/mpegts.js).
 //   GET  /camera.jpg   Single JPEG frame from BambuSource.

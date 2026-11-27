@@ -57,3 +57,7 @@ IDAHook.log
 # (keep .github; ignore any stray artifact dirs)
 downloads/
 artifacts/
+
+# ---- web ui -----------------------------------------------------------------
+web/node_modules/
+web/dist/

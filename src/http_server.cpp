@@ -24,13 +24,18 @@
 #include <deque>
 #include <condition_variable>
 #include <cerrno>
+#include <filesystem>
+#include <fstream>
+#include <string_view>
 
 #include <chrono>
 
 #if defined(_WIN32)
 #  define WIN32_LEAN_AND_MEAN
+#  define NOMINMAX
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
+#  include <windows.h>
 #else
 #  include <sys/socket.h>
 #  include <netinet/in.h>
@@ -243,6 +248,7 @@ std::thread g_accept_thread;
 BambuBridge* g_bridge = nullptr;
 bool g_mcp_control = false;
 std::atomic<bool> g_web_api{false};
+std::filesystem::path g_web_root;
 
 enum class ConnMode { http, stream };
 std::mutex g_conn_mtx;
@@ -645,6 +651,117 @@ void run_sse(sock_t s) {
     }
 }
 
+bool safe_asset_name(std::string_view name) {
+    if (name.empty() || name.size() > 180 || name == "." || name == "..") return false;
+    for (unsigned char ch : name) {
+        const bool ok = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                        (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+std::string ui_mime(std::string_view rel) {
+    const auto dot = rel.rfind('.');
+    if (dot == std::string_view::npos) return {};
+    const auto ext = rel.substr(dot);
+    if (ext == ".html") return "text/html; charset=utf-8";
+    if (ext == ".css") return "text/css; charset=utf-8";
+    if (ext == ".js") return "text/javascript; charset=utf-8";
+    if (ext == ".svg") return "image/svg+xml";
+    if (ext == ".woff2") return "font/woff2";
+    if (ext == ".woff") return "font/woff";
+    return {};
+}
+
+bool path_within(const std::filesystem::path& root, const std::filesystem::path& full) {
+    const auto relative = full.lexically_relative(root);
+    if (relative.empty()) return false;
+    for (const auto& part : relative) {
+        if (part.empty() || part == "." || part == "..") return false;
+    }
+    return true;
+}
+
+std::filesystem::path executable_dir() {
+#if defined(_WIN32)
+    std::wstring buf(32768, L'\0');
+    const DWORD n = GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+    if (n == 0 || n >= buf.size()) return {};
+    buf.resize(n);
+    return std::filesystem::path(buf).parent_path();
+#elif defined(__linux__)
+    std::string buf(4096, '\0');
+    const ssize_t n = ::readlink("/proc/self/exe", buf.data(), buf.size() - 1);
+    if (n <= 0) return {};
+    buf.resize(static_cast<size_t>(n));
+    return std::filesystem::path(buf).parent_path();
+#else
+    return {};
+#endif
+}
+
+bool directory_has_index(const std::filesystem::path& dir) {
+    std::error_code ec;
+    return std::filesystem::is_regular_file(dir / "index.html", ec);
+}
+
+void locate_web_root() {
+    std::error_code ec;
+    std::vector<std::filesystem::path> candidates;
+    const auto cwd = std::filesystem::current_path(ec);
+    if (!ec) candidates.push_back(cwd / "web" / "dist");
+    const auto exe = executable_dir();
+    if (!exe.empty()) {
+        candidates.push_back(exe / "web" / "dist");
+        candidates.push_back(exe.parent_path() / "web" / "dist");
+    }
+    for (const auto& candidate : candidates) {
+        if (!directory_has_index(candidate)) continue;
+        const auto canon = std::filesystem::weakly_canonical(candidate, ec);
+        if (ec) continue;
+        g_web_root = canon;
+        std::fprintf(stdout, "[http] web ui: %s\n", g_web_root.string().c_str());
+        return;
+    }
+}
+
+bool load_ui_file(const std::filesystem::path& rel, std::string& body, std::string& type) {
+    type = ui_mime(rel.generic_string());
+    if (type.empty()) return false;
+    std::error_code ec;
+    const auto full = std::filesystem::weakly_canonical(g_web_root / rel, ec);
+    if (ec || !path_within(g_web_root, full) || !std::filesystem::is_regular_file(full, ec) || ec) return false;
+    const auto size = std::filesystem::file_size(full, ec);
+    if (ec || size > 16 * 1024 * 1024) return false;
+    std::ifstream in(full, std::ios::binary);
+    if (!in) return false;
+    body.assign(static_cast<size_t>(size), '\0');
+    return size == 0 || static_cast<bool>(in.read(&body[0], static_cast<std::streamsize>(size)));
+}
+
+bool serve_web_ui(sock_t s, const std::string& path) {
+    if (g_web_root.empty()) return false;
+    std::filesystem::path rel;
+    bool immutable = false;
+    if (path == "/" || path == "/index.html") rel = "index.html";
+    else if (path.rfind("/assets/", 0) == 0) {
+        const auto name = std::string_view(path).substr(std::string_view("/assets/").size());
+        if (!safe_asset_name(name)) return false;
+        rel = std::filesystem::path("assets") / std::string(name);
+        immutable = true;
+    } else return false;
+
+    std::string body, type;
+    if (!load_ui_file(rel, body, type)) {
+        send_response(s, 404, "text/plain; charset=utf-8", "Not Found", true);
+        return true;
+    }
+    const char* cache = immutable ? "Cache-Control: public, max-age=31536000, immutable\r\n" : "";
+    send_response(s, 200, type, body, !immutable, cache);
+    return true;
+}
+
 void handle_conn(sock_t s) {
     std::string first_line, body, unread;
     Headers headers;
@@ -883,6 +1000,8 @@ void handle_conn(sock_t s) {
 
     if (path == "/events" && method == "GET") return run_sse(s);
 
+    if (g_web_api && method == "GET" && query.empty() && serve_web_ui(s, path)) return;
+
     send_response(s, 404, "text/plain", "Not Found");
 }
 
@@ -928,6 +1047,8 @@ bool start_http_server(BambuBridge& bridge, int port, bool mcp_control, bool loo
     if (!g_listen) { std::fprintf(stderr, "[http] %s\n", err.c_str()); return false; }
 
     g_web_api = web_api;
+    g_web_root.clear();
+    if (web_api) locate_web_root();
     g_mcp_control = mcp_control;
     g_bridge = &bridge;
     g_http_port = port;
