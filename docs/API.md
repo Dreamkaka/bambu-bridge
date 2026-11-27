@@ -280,6 +280,10 @@ data: {"event":"on_message","payload":{"dev_id":"...","msg":"...","source":"clou
 {"event":"on_message","payload":{"dev_id":"...","msg":"...","source":"cloud"}}
 ```
 
+### MCP（Streamable HTTP）
+
+HTTP 服务启用后，在本机 MCP 客户端选择 **Streamable HTTP**，连接 `http://127.0.0.1:8080/mcp`。该接口和 `/login` 共用 Bridge 实例及登录状态。`POST /mcp` 对请求返回 JSON-RPC JSON，对通知返回 `202` 空响应。服务不分配会话 ID，也不提供独立 SSE 流（`GET /mcp` 返回 `405`）。仅允许本机连接以及对应的 `Host`、`Origin`；不要通过代理对外暴露。工具和 `--mcp-enable-control` 行为与下述 stdio 相同。
+
 ### MCP（stdio）
 
 使用 `bambu-bridge --mcp --plugin-dir <目录>`，不要使用会默认启动 HTTP 的打包脚本。使用 [MCP stdio](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#stdio)，每行一个 JSON-RPC 2.0 消息；日志写入 stderr，旧版异步事件不会混入 stdout。客户端先发送 `initialize`，再发 `notifications/initialized`，然后调用 `tools/list` 和 `tools/call`。也支持 `ping`。

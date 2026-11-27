@@ -70,9 +70,9 @@ int main(int argc, char** argv) {
         else { std::fprintf(stderr, "unknown option: %s\n", a.c_str()); usage(argv[0]); return 1; }
     }
 
-    if ((use_mcp && (use_stdio || http_port != 0)) || (mcp_control && !use_mcp)) {
+    if ((use_mcp && (use_stdio || http_port != 0)) || (mcp_control && !use_mcp && http_port <= 0)) {
         std::fprintf(stderr, "[bridge] --mcp cannot be combined with --stdio or an enabled HTTP port; "
-                             "--mcp-enable-control requires --mcp\n");
+                             "--mcp-enable-control requires an MCP transport\n");
         return 1;
     }
     std::unique_ptr<std::FILE, decltype(&std::fclose)> mcp_output(nullptr, std::fclose);
@@ -115,7 +115,7 @@ int main(int argc, char** argv) {
 
     // Start HTTP on a background thread (runs alongside stdio, if enabled).
     if (http_port > 0) {
-        if (!start_http_server(bridge, http_port)) {
+        if (!start_http_server(bridge, http_port, mcp_control)) {
             std::fprintf(stderr, "[bridge] failed to start HTTP server on port %d\n", http_port);
             return 1;
         }

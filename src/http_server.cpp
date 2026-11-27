@@ -2,6 +2,9 @@
 #include "rpc_handler.hpp"
 #include "json.hpp"
 #include "camera_stream.hpp"
+#include "mcp_stdio.hpp"
+#include <charconv>
+#include <map>
 
 #include <cstdio>
 #include <cstring>
@@ -64,54 +67,59 @@ void close_sock(sock_t s) {
 #endif
 }
 
-bool read_request(sock_t s, std::string* first_line, std::string* body) {
+using Headers = std::map<std::string, std::string>;
+
+std::string_view trim_http(std::string_view value) {
+    const auto first = value.find_first_not_of(" \t");
+    if (first == std::string_view::npos) return {};
+    return value.substr(first, value.find_last_not_of(" \t") - first + 1);
+}
+
+bool read_request(sock_t s, std::string* first_line, Headers& headers, std::string* body) {
     std::string buf;
     char tmp[4096];
-#if defined(_WIN32)
-    int n = ::recv((SOCKET)s, tmp, sizeof(tmp), 0);
-#else
-    int n = ::recv((int)s, tmp, sizeof(tmp), 0);
-#endif
-    if (n <= 0) return false;
-    buf.assign(tmp, n);
-    // Look for \r\n\r\n separating headers from body.
-    size_t hdr_end = buf.find("\r\n\r\n");
-    size_t content_len = 0;
-    if (hdr_end != std::string::npos) {
-        std::string hdr = buf.substr(0, hdr_end);
-        std::istringstream iss(hdr);
-        bool first = true;
-        std::string line;
-        while (std::getline(iss, line)) {
-            if (!line.empty() && line.back() == '\r') line.pop_back();
-            if (first) { *first_line = line; first = false; }
-            else {
-                std::string lower = line;
-                for (auto& ch : lower) ch = (char)tolower((unsigned char)ch);
-                if (lower.rfind("content-length:", 0) == 0) {
-                    content_len = (size_t)atoll(line.substr(line.find(':') + 1).c_str());
-                }
-            }
-        }
-    } else {
-        *first_line = buf;
-        return true;
-    }
-    // collect body
-    size_t body_start = hdr_end + 4;
-    size_t got = buf.size() - body_start;
-    while (got < content_len) {
+    auto receive = [&] {
 #if defined(_WIN32)
         int n = ::recv((SOCKET)s, tmp, sizeof(tmp), 0);
 #else
         int n = ::recv((int)s, tmp, sizeof(tmp), 0);
 #endif
-        if (n <= 0) break;
+        if (n <= 0) return false;
         buf.append(tmp, n);
-        got += n;
+        return true;
+    };
+    size_t end;
+    while ((end = buf.find("\r\n\r\n")) == std::string::npos) {
+        if (buf.size() >= 32768 || !receive()) return false;
     }
-    if (body_start < buf.size())
-        *body = buf.substr(body_start, content_len);
+    const auto first = buf.find("\r\n");
+    first_line->assign(buf, 0, first);
+    for (size_t pos = first + 2; pos < end;) {
+        const auto next = buf.find("\r\n", pos);
+        const std::string_view line(buf.data() + pos, next - pos);
+        const auto colon = line.find(':');
+        if (!colon || colon == std::string_view::npos) return false;
+        std::string key(line.substr(0, colon));
+        for (auto& ch : key) ch = char(std::tolower(static_cast<unsigned char>(ch)));
+        const auto value = trim_http(line.substr(colon + 1));
+        auto [it, inserted] = headers.try_emplace(key, value);
+        if (!inserted) {
+            if (key != "accept") return false;
+            it->second.append(",").append(value);
+        }
+        pos = next + 2;
+    }
+    if (headers.count("transfer-encoding")) return false;
+    size_t length = 0;
+    if (const auto it = headers.find("content-length"); it != headers.end()) {
+        const auto& value = it->second;
+        const auto parsed = std::from_chars(value.data(), value.data() + value.size(), length);
+        if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size() || length > 16 * 1024 * 1024)
+            return false;
+    }
+    const size_t offset = end + 4;
+    while (buf.size() - offset < length) if (!receive()) return false;
+    body->assign(buf, offset, length);
     return true;
 }
 
@@ -133,14 +141,18 @@ bool send_all(sock_t s, const std::string& data) {
     return true;
 }
 
-void send_response(sock_t s, int status, const std::string& ct, const std::string& body, bool no_store = false) {
-    const char* reason = status == 400 ? "Bad Request" : status == 502 ? "Bad Gateway"
-                       : status == 503 ? "Service Unavailable" : status == 504 ? "Gateway Timeout"
-                       : status == 404 ? "Not Found" : "OK";
+void send_response(sock_t s, int status, const std::string& ct, const std::string& body,
+                   bool no_store = false, const char* extra = "") {
+    const char* reason = status == 202 ? "Accepted" : status == 400 ? "Bad Request"
+                       : status == 403 ? "Forbidden" : status == 404 ? "Not Found"
+                       : status == 405 ? "Method Not Allowed" : status == 406 ? "Not Acceptable"
+                       : status == 415 ? "Unsupported Media Type" : status == 502 ? "Bad Gateway"
+                       : status == 503 ? "Service Unavailable" : status == 504 ? "Gateway Timeout" : "OK";
     std::string hdr = "HTTP/1.1 " + std::to_string(status) + " " + reason + "\r\n"
                       "Content-Type: " + ct + "\r\n"
                       "Content-Length: " + std::to_string(body.size()) + "\r\n";
     if (no_store) hdr += "Cache-Control: no-store\r\n";
+    hdr += extra;
     hdr += "Connection: close\r\n\r\n";
     if (send_all(s, hdr)) send_all(s, body);
 }
@@ -151,6 +163,7 @@ sock_t g_listen = 0;
 int    g_http_port = 0;
 std::thread g_accept_thread;
 BambuBridge* g_bridge = nullptr;
+bool g_mcp_control = false;
 
 // Event broadcast for /events (SSE).
 std::mutex g_event_mtx;
@@ -229,9 +242,70 @@ std::string url_query_param(const std::string& query, const std::string& key) {
     return "";
 }
 
+bool mcp_loopback_peer(sock_t s) {
+    sockaddr_in peer{};
+#ifdef _WIN32
+    int len = sizeof(peer);
+    const int rc = getpeername(static_cast<SOCKET>(s), reinterpret_cast<sockaddr*>(&peer), &len);
+#else
+    socklen_t len = sizeof(peer);
+    const int rc = getpeername(s, reinterpret_cast<sockaddr*>(&peer), &len);
+#endif
+    return rc == 0 && peer.sin_family == AF_INET && (ntohl(peer.sin_addr.s_addr) >> 24) == 127;
+}
+
+bool accepts_json(std::string_view accept) {
+    while (!accept.empty()) {
+        const auto comma = accept.find(',');
+        auto item = accept.substr(0, comma);
+        const auto semi = item.find(';');
+        const auto type = trim_http(item.substr(0, semi));
+        if (type == "application/json" || type == "application/*" || type == "*/*") {
+            auto quality = semi == std::string_view::npos ? std::string_view{} : trim_http(item.substr(semi + 1));
+            if (quality.rfind("q=", 0) != 0 || quality.substr(2).find_first_not_of("0.") != std::string_view::npos)
+                return true;
+        }
+        if (comma == std::string_view::npos) break;
+        accept.remove_prefix(comma + 1);
+    }
+    return false;
+}
+
+void handle_mcp(sock_t s, const std::string& method, const Headers& headers, const std::string& body) {
+    const auto header = [&](const char* name) -> std::string_view {
+        const auto it = headers.find(name);
+        return it == headers.end() ? std::string_view{} : std::string_view(it->second);
+    };
+    const auto port = ":" + std::to_string(g_http_port);
+    const auto ip = "127.0.0.1" + port, localhost = "localhost" + port;
+    const auto host = header("host"), origin = header("origin");
+    const auto reject = [&](int status, const char* message, const char* extra = "") {
+        send_response(s, status, "text/plain; charset=utf-8", message, true, extra);
+    };
+    if (!mcp_loopback_peer(s) || (host != ip && host != localhost) ||
+        (headers.count("origin") && origin != "http://" + ip && origin != "http://" + localhost))
+        return reject(403, "MCP requires a local peer, Host and Origin");
+    if (method != "POST") return reject(405, "MCP accepts POST only", "Allow: POST\r\n");
+    const auto version = header("mcp-protocol-version");
+    if (headers.count("mcp-protocol-version") && !supports_mcp_http_version(version))
+        return reject(400, "Unsupported MCP-Protocol-Version");
+    auto content_type = header("content-type");
+    if (trim_http(content_type.substr(0, content_type.find(';'))) != "application/json")
+        return reject(415, "MCP expects application/json");
+    if (headers.count("accept") && !accepts_json(header("accept")))
+        return reject(406, "MCP responses use application/json");
+    const auto response = dispatch_mcp_http(*g_bridge, body, g_mcp_control);
+    send_response(s, response.empty() ? 202 : 200, "application/json", response, true);
+}
+
 void handle_conn(sock_t s) {
     std::string first_line, body;
-    if (!read_request(s, &first_line, &body)) { close_sock(s); return; }
+    Headers headers;
+    if (!read_request(s, &first_line, headers, &body)) {
+        send_response(s, 400, "text/plain", "Malformed HTTP request");
+        close_sock(s);
+        return;
+    }
 
     std::string method, path, query;
     {
@@ -241,6 +315,12 @@ void handle_conn(sock_t s) {
     {
         size_t q = path.find('?');
         if (q != std::string::npos) { query = path.substr(q + 1); path = path.substr(0, q); }
+    }
+
+    if (path == "/mcp") {
+        handle_mcp(s, method, headers, body);
+        close_sock(s);
+        return;
     }
 
     if (path == "/health") {
@@ -526,7 +606,8 @@ std::string build_login_url(const std::string& host_in, int port, const std::str
     return host + "/sign-in?&from=studio&source=portal&to=" + enc(callback);
 }
 
-bool start_http_server(BambuBridge& bridge, int port) {
+bool start_http_server(BambuBridge& bridge, int port, bool mcp_control) {
+    g_mcp_control = mcp_control;
     g_bridge = &bridge;
     g_http_port = port;
     // Register a sink that broadcasts to SSE clients.

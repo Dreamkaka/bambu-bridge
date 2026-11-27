@@ -146,9 +146,11 @@ Linux x64：
 - 一行一个响应：`{"ok":true,"result":...}` 或 `{"ok":false,"error":"..."}`
 - 异步事件：`{"event":"...","payload":{...}}`（客户端靠是否有 `event` 键区分）
 
-### MCP（stdio）
+### MCP（Streamable HTTP / stdio）
 
-在支持 MCP 的客户端中添加本地 stdio 服务。把下面的绝对路径换成自己的可执行文件和随包 `plugins` 目录（Windows 可使用 `C:/.../bambu-bridge.exe`）：
+启动 Bridge 的 HTTP 服务（打包版直接运行 `run.bat` 或 `./run.sh`），在同一台机器的 MCP 客户端中选择 **Streamable HTTP**，地址填写 `http://127.0.0.1:8080/mcp`。用现有的 `http://127.0.0.1:8080/login` 登录即可，MCP 共享同一进程的登录态，无需另填 `--config-dir` 或 `--plugin-dir`。`/events` 仍是打印机事件流，不是 MCP 地址。
+
+也可继续使用本地 stdio 模式。把下面的绝对路径换成自己的可执行文件和随包 `plugins` 目录（Windows 可使用 `C:/.../bambu-bridge.exe`）：
 
 ```json
 {
@@ -161,9 +163,9 @@ Linux x64：
 }
 ```
 
-默认提供 Bridge 状态、设备列表、打印机状态、固件版本和 JPEG 截图。需要暂停、恢复或停止打印时，才添加 `--mcp-enable-control`。MCP 不开放 HTTP 端口；HTTP 和旧 `--stdio` 调用方式不变。
+两种传输默认都提供 Bridge 状态、设备列表、打印机状态、固件版本和 JPEG 截图。需要暂停、恢复或停止打印时，才在 Bridge 启动参数中添加 `--mcp-enable-control`。
 
-云端工具需要先用 HTTP 模式登录。同一系统用户下，HTTP 和 MCP 默认读取同一配置目录（Windows：`%APPDATA%\bambu-bridge`；Linux：`~/bambu-bridge`），不用填写 `--config-dir`。只有登录时指定过自定义目录或非默认区域，才在 MCP 参数中沿用。完整工具参数及结果格式见 [API 文档](docs/API.md#mcpstdio)。
+使用 stdio 时，可在同一系统用户下复用先前 HTTP 登录的默认配置目录；只有登录时指定过自定义目录或非默认区域，才需要在 stdio 参数中沿用。完整参数见 [API 文档](docs/API.md#mcpstdio)。
 
 ---
 

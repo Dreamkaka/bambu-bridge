@@ -209,7 +209,7 @@ Json rpc_error(const Json& id, int code, const char* message) {
     return envelope(id).set("error", Json::object().set("code", Json::n(code)).set("message", Json::s(message)));
 }
 
-enum class State { fresh, initializing, ready };
+enum class State { fresh, initializing, ready, stateless };
 
 Json dispatch(BambuBridge& bridge, const Json& request, State& state, bool enable_control) {
     const auto* id = request.find("id");
@@ -228,10 +228,11 @@ Json dispatch(BambuBridge& bridge, const Json& request, State& state, bool enabl
     if (params && params->kind != Json::Object) return rpc_error(*id, -32602, "params must be an object");
     if (name == "ping") return envelope(*id).set("result", Json::object());
     if (name == "initialize") {
-        if (state != State::fresh) return rpc_error(*id, -32600, "Already initialized");
+        if (state != State::fresh && state != State::stateless)
+            return rpc_error(*id, -32600, "Already initialized");
         auto version = params ? string_view(params->find("protocolVersion")) : std::string_view{};
         if (version.empty()) return rpc_error(*id, -32602, "protocolVersion is required");
-        const auto* negotiated = version == "2024-11-05" ? "2024-11-05" :
+        const auto* negotiated = version == "2024-11-05" && state != State::stateless ? "2024-11-05" :
                                  version == "2025-03-26" ? "2025-03-26" :
                                  version == "2025-06-18" ? "2025-06-18" : protocol;
         state = State::initializing;
@@ -242,7 +243,8 @@ Json dispatch(BambuBridge& bridge, const Json& request, State& state, bool enabl
               .set("capabilities", Json::object().set("tools", Json::object()));
         return envelope(*id).set("result", std::move(result));
     }
-    if (state != State::ready) return rpc_error(*id, -32002, "Server not initialized");
+    if (state != State::ready && state != State::stateless)
+        return rpc_error(*id, -32002, "Server not initialized");
     if (name == "tools/list") return envelope(*id).set("result", list_tools(enable_control));
     if (name != "tools/call") return rpc_error(*id, -32601, "Method not found");
     const auto tool_name = params ? string_view(params->find("name")) : std::string_view{};
@@ -264,6 +266,18 @@ Json dispatch(BambuBridge& bridge, const Json& request, State& state, bool enabl
 }
 
 } // namespace
+
+bool supports_mcp_http_version(std::string_view version) {
+    return version == "2025-03-26" || version == "2025-06-18" || version == protocol;
+}
+
+std::string dispatch_mcp_http(BambuBridge& bridge, const std::string& body, bool enable_control) {
+    State state = State::stateless;
+    Json request;
+    auto reply = json_parse(body, &request) ? dispatch(bridge, request, state, enable_control)
+                                           : rpc_error(Json::null(), -32700, "Parse error");
+    return reply.kind == Json::Null ? std::string{} : json_dump(reply);
+}
 
 bool run_mcp_stdio(BambuBridge& bridge, std::FILE* output, bool enable_control) {
     State state = State::fresh;
