@@ -1,6 +1,6 @@
 # bambu-bridge 接口文档
 
-`bambu-bridge` 把 Bambu 网络插件封装成独立进程，对外提供 **HTTP/REST + SSE** 和 **stdio 行分隔 JSON-RPC**。下方启动示例使用项目内的 `open_bambu_networking_plugin`。
+`bambu-bridge` 把 Bambu 网络插件封装成独立进程，对外提供 **HTTP/REST + SSE**、可选的本机 **Web API + WebSocket** 和 **stdio 行分隔 JSON-RPC**。下方启动示例使用项目内的 `open_bambu_networking_plugin`。
 
 进程启动时会自动完成与 OrcaSlicer 相同的 agent 初始化：
 
@@ -41,6 +41,7 @@ Linux：
 | `--client-version <ver>` | 上报给云端的 `X-BBL-Client-Version` 和摄像头 `net_ver` | 插件 `get_version()` |
 | `--http <port>` | 开 HTTP 服务 | 未指定则不开 HTTP |
 | `--http-loopback` | 仅在 `127.0.0.1` 监听 HTTP/REST 和 MCP；容器默认启用 | 关闭 |
+| `--web-api` | 启用 `/api/v1` 和浏览器 WebSocket；要求 `--http` 的端口为 1–65535，隐含 `--http-loopback` | 关闭 |
 | `--stdio` | 开 stdin/stdout JSON-RPC | 未指定 `--http` 时默认开 |
 | `--no-stdio` | 只开 HTTP | |
 | `--mcp` | 供 MCP 客户端启动的标准 stdio 服务；不能与 `--stdio` 或启用的 HTTP 同时使用 | 关闭 |
@@ -48,6 +49,27 @@ Linux：
 | `--help` | 帮助 | |
 
 直接启动二进制时，`--plugin-dir` 缺失或加载失败会退出。Windows x64 的 `run.bat` 会自动传入随附插件目录，并默认监听 HTTP `8080`；可以用 `--http <port>` 覆盖。云配置见 [README 的运行说明](../README.md#运行)。
+
+### 本机 Web API
+
+在原启动命令上加 `--web-api --http 8080`，浏览器使用 `http://localhost:8080`。服务只接受回环对端和与监听端口匹配的 `localhost` / `127.0.0.1` Host；浏览器请求必须同源，WebSocket 必须带同源 `Origin`。普通 REST 可不带 `Origin`，供本机命令行调用。启用后，旧 HTTP 路径也受同源约束，不提供 CORS。这不是本机客户端认证：仅在可信本机使用，不要通过代理或端口转发对外开放。
+
+下列路径都带 `/api/v1` 前缀，不接受查询参数。POST 只接受最多 4096 字节的 `application/json` 对象；GET 和 DELETE 不带请求体。设备 ID 是 1–64 个 ASCII 字母、数字、`_` 或 `-`。
+
+| 方法和相对路径 | 操作 |
+|---|---|
+| `GET /status` | 读取桥接、账号和 MQTT 就绪状态 |
+| `GET /session/login-url` | 返回 `{url}`；在顶级导航或新窗口打开，回调后看 `login_result` 或重读状态 |
+| `GET /printers` | 返回 `{printers:[…]}`，仅账号绑定的设备，不含访问码 |
+| `POST /lan/connection` | 传 `{dev_id,dev_ip,password}`（IPv4 字面量）；从事件确认连接状态 |
+| `DELETE /lan/connection` | 断开当前 LAN 连接 |
+| `POST /printers/{dev_id}/status/refresh` | 传 `{"source":"cloud"}` 或 `{"source":"lan"}`，请求设备上报 |
+| `POST /printers/{dev_id}/actions/{pause,resume,stop}` | 同样指定 `source`；只允许暂停、继续、停止 |
+
+成功返回 `{"ok":true,"result":…}`；失败返回 `{"ok":false,"error":{"code":"…"}}`，插件明确返回非零时另含 `error.plugin_code`。`202` 只表示请求已被接受，不代表设备已经执行，不应据此更新打印状态或自动重发。`409 login_required` 表示账号未登录，`503 agent_unavailable` 表示 agent 未就绪。
+
+连接 `ws://localhost:8080/api/v1/ws` 后等待首帧 `{"event":"ready","payload":{}}`，再读 `/status` 和 `/printers`，并刷新当前关注的设备。事件包括 `printer_status`（按 `dev_id`、`source` 过滤，`report` 可能只是增量）、`account_changed`、`login_result`、`cloud_connection`、`lan_connection`（`status:0` 表示已连接）。不重放历史，不因连接 WebSocket 增删 MQTT 订阅。断线后将旧设备状态标记为未确认，重连后重新读取和刷新。相机仍用现有 HTTP 接口。
+
 
 证书是 OrcaSlicer 自带的 DigiCert 公钥证书，用于插件校验 `*.bambulab.com` HTTPS，**不需要也不应该去偷任何私钥**。
 

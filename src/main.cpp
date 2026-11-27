@@ -7,6 +7,7 @@
 #include "json.hpp"
 
 #include <cstdio>
+#include <charconv>
 #include <cstdlib>
 #include <cstring>
 #include <string>
@@ -32,6 +33,7 @@ void usage(const char* prog) {
         "  --client-version <ver>   X-BBL-Client-Version / camera net_ver (default: plugin get_version)\n"
         "  --http <port>            Enable HTTP/REST server on given port (0 = disabled)\n"
         "  --http-loopback         Bind HTTP/REST and MCP to 127.0.0.1 only\n"
+        "  --web-api               Enable local Web API (requires --http, implies --http-loopback)\n"
         "  --stdio                  Enable stdio JSON-RPC mode (default: enabled if --http not given)\n"
         "  --no-stdio               Disable stdio JSON-RPC mode\n"
         "  --mcp                   Serve MCP over stdio instead of HTTP/legacy stdio\n"
@@ -48,6 +50,9 @@ int main(int argc, char** argv) {
     bool use_stdio = false;
     bool http_given = false;
     bool http_loopback = false;
+    bool web_api = false;
+    const char* final_http_arg = nullptr;
+    const char* legacy_http_arg = nullptr;
     bool use_mcp = false;
     bool mcp_control = false;
 
@@ -63,14 +68,33 @@ int main(int argc, char** argv) {
         else if (a == "--log-dir") { const char* v = next("--log-dir"); if (v) cfg.log_dir = v; }
         else if (a == "--cert") { const char* v = next("--cert"); if (v) cfg.cert_folder = v; }
         else if (a == "--client-version") { const char* v = next("--client-version"); if (v) cfg.client_version = v; }
-        else if (a == "--http") { const char* v = next("--http"); if (v) http_port = atoi(v); http_given = true; }
+        else if (a == "--http") {
+            final_http_arg = next("--http");
+            if (final_http_arg) legacy_http_arg = final_http_arg;
+            http_given = true;
+        }
         else if (a == "--http-loopback") http_loopback = true;
+        else if (a == "--web-api") web_api = true;
         else if (a == "--stdio") { use_stdio = true; }
         else if (a == "--no-stdio") { use_stdio = false; }
         else if (a == "--mcp") use_mcp = true;
         else if (a == "--mcp-enable-control") mcp_control = true;
         else if (a == "--help") { usage(argv[0]); return 0; }
         else { std::fprintf(stderr, "unknown option: %s\n", a.c_str()); usage(argv[0]); return 1; }
+    }
+
+    if (web_api) {
+        if (final_http_arg) {
+            const auto end = final_http_arg + std::strlen(final_http_arg);
+            const auto parsed = std::from_chars(final_http_arg, end, http_port);
+            if (parsed.ec != std::errc{} || parsed.ptr != end) http_port = 0;
+        }
+        if (http_port < 1 || http_port > 65535) {
+            std::fprintf(stderr, "[bridge] --web-api requires --http with a port from 1 to 65535\n");
+            return 1;
+        }
+    } else if (legacy_http_arg) {
+        http_port = std::atoi(legacy_http_arg);
     }
 
     if ((use_mcp && (use_stdio || http_port != 0)) || (mcp_control && !use_mcp && http_port <= 0)) {
@@ -118,7 +142,7 @@ int main(int argc, char** argv) {
 
     // Start HTTP on a background thread (runs alongside stdio, if enabled).
     if (http_port > 0) {
-        if (!start_http_server(bridge, http_port, mcp_control, http_loopback)) {
+        if (!start_http_server(bridge, http_port, mcp_control, http_loopback || web_api, web_api)) {
             std::fprintf(stderr, "[bridge] failed to start HTTP server on port %d\n", http_port);
             return 1;
         }

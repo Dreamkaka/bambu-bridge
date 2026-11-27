@@ -598,7 +598,8 @@ std::vector<std::string> BambuBridge::mqtt_ready_devices() const {
     return std::vector<std::string>(mqtt_ready_.begin(), mqtt_ready_.end());
 }
 
-int BambuBridge::ensure_cloud_ready(const std::string& dev_id, int timeout_ms, std::string* err) {
+int BambuBridge::ensure_cloud_ready(const std::string& dev_id, int timeout_ms, std::string* err, bool* plugin_called) {
+    if (plugin_called) *plugin_called = false;
     if (!has_agent()) {
         if (err) *err = "agent not created";
         return BAMBU_NETWORK_ERR_INVALID_HANDLE;
@@ -613,6 +614,7 @@ int BambuBridge::ensure_cloud_ready(const std::string& dev_id, int timeout_ms, s
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
         int rc = fn_refresh_connection ? refresh_connection() : connect_server();
         if (rc != BAMBU_NETWORK_SUCCESS) {
+            if (plugin_called) *plugin_called = fn_refresh_connection || fn_connect_server;
             if (err) *err = "cloud connection failed: " + std::to_string(rc);
             return rc;
         }
@@ -626,6 +628,7 @@ int BambuBridge::ensure_cloud_ready(const std::string& dev_id, int timeout_ms, s
     }
     if (dev_id.empty()) return BAMBU_NETWORK_SUCCESS;
     int rc = add_subscribe({dev_id});
+    if (plugin_called) *plugin_called = fn_add_subscribe != nullptr;
     if (rc != BAMBU_NETWORK_SUCCESS && err) *err = "add_subscribe failed: " + std::to_string(rc);
     return rc;
 }
@@ -683,13 +686,14 @@ BambuBridge::CommandWait BambuBridge::printer_command(const std::string& dev_id,
         return out;
     }
     if (!lan) {
-        int ready = ensure_cloud_ready(dev_id, timeout_ms, &out.error);
+        int ready = ensure_cloud_ready(dev_id, timeout_ms, &out.error, &out.plugin_called);
         if (ready != BAMBU_NETWORK_SUCCESS) {
             out.code = ready;
             return out;
         }
     }
     auto publish = [&] {
+        out.plugin_called = lan ? has_agent() && fn_send_message_to_printer : fn_send_message != nullptr;
         return lan ? send_message_to_printer(dev_id, json_str, qos, flag)
                    : (fn_send_message ? fn_send_message(agent_, dev_id, json_str, qos, flag)
                                       : BAMBU_NETWORK_ERR_INVALID_HANDLE);
@@ -743,11 +747,14 @@ BambuBridge::CommandWait BambuBridge::printer_command(const std::string& dev_id,
 }
 
 int BambuBridge::connect_printer(const std::string& dev_id, const std::string& dev_ip,
-                                 const std::string& username, const std::string& password, bool use_ssl) {
+                                 const std::string& username, const std::string& password, bool use_ssl,
+                                 bool* plugin_called) {
+    if (plugin_called) *plugin_called = has_agent() && fn_connect_printer;
     if (!has_agent() || !fn_connect_printer) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     return fn_connect_printer(agent_, dev_id, dev_ip, username, password, use_ssl);
 }
-int BambuBridge::disconnect_printer() {
+int BambuBridge::disconnect_printer(bool* plugin_called) {
+    if (plugin_called) *plugin_called = has_agent() && fn_disconnect_printer;
     if (!has_agent() || !fn_disconnect_printer) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     return fn_disconnect_printer(agent_);
 }
@@ -772,7 +779,8 @@ int BambuBridge::get_my_profile(const std::string& token, std::string* http_body
     if (!has_agent() || !fn_get_my_profile) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     unsigned c = 0; int r = fn_get_my_profile(agent_, token, &c, http_body); set_opt(http_code, c); return r;
 }
-int BambuBridge::get_user_print_info(std::string* http_body, unsigned* http_code) {
+int BambuBridge::get_user_print_info(std::string* http_body, unsigned* http_code, bool* plugin_called) {
+    if (plugin_called) *plugin_called = has_agent() && fn_get_user_print_info;
     if (!has_agent() || !fn_get_user_print_info) return BAMBU_NETWORK_ERR_INVALID_HANDLE;
     unsigned c = 0; int r = fn_get_user_print_info(agent_, &c, http_body); set_opt(http_code, c); return r;
 }

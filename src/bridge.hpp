@@ -116,15 +116,16 @@ public:
     int  send_message_to_printer(const std::string& dev_id, const std::string& json_str, int qos, int flag);
 
     int  connect_printer(const std::string& dev_id, const std::string& dev_ip,
-                         const std::string& username, const std::string& password, bool use_ssl);
-    int  disconnect_printer();
+                         const std::string& username, const std::string& password, bool use_ssl,
+                         bool* plugin_called = nullptr);
+    int  disconnect_printer(bool* plugin_called = nullptr);
     bool start_discovery(bool start, bool sending);
     void install_device_cert(const std::string& dev_id, bool lan_only);
     int  check_cert();
 
     int  get_my_token(const std::string& ticket, std::string* http_body, unsigned* http_code);
     int  get_my_profile(const std::string& token, std::string* http_body, unsigned* http_code);
-    int  get_user_print_info(std::string* http_body, unsigned* http_code);
+    int  get_user_print_info(std::string* http_body, unsigned* http_code, bool* plugin_called = nullptr);
     int  get_user_tasks(const std::string& dev_id, int status, int offset, int limit, std::string* http_body);
     int  get_printer_firmware(const std::string& dev_id, std::string* http_body, unsigned* http_code);
     int  get_slice_info(const std::string& project_id, const std::string& profile_id, int plate_index, std::string* slice_json);
@@ -142,13 +143,15 @@ public:
 
     struct CommandWait {
         int code = BAMBU_NETWORK_ERR_TIMEOUT;
+        bool plugin_called = false;
         bool timed_out = true;
         std::string dev_id;
         std::string source;
         std::string msg;
         std::string error;
     };
-    int  ensure_cloud_ready(const std::string& dev_id, int timeout_ms = 10000, std::string* err = nullptr);
+    int  ensure_cloud_ready(const std::string& dev_id, int timeout_ms = 10000, std::string* err = nullptr,
+                            bool* plugin_called = nullptr);
     CommandWait printer_command(const std::string& dev_id, const std::string& json_str, bool lan,
                                 int timeout_ms = 8000, int qos = 0, int flag = 0, bool wait = true);
     static std::string next_command_sequence() {

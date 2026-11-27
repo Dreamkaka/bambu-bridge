@@ -45,6 +45,8 @@ echo "[build] $CXX -std=$STD -> $OUT"
     src/stdio_transport.cpp \
     src/mcp_stdio.cpp \
     src/http_server.cpp \
+    src/http_web_api.cpp \
+    src/http_websocket.cpp \
     src/camera_stream.cpp \
     "$h264_lib" "$jpeg_lib" -pthread -ldl \
     -o "$OUT"

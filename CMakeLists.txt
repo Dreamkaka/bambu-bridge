@@ -48,6 +48,8 @@ add_executable(bambu-bridge
     src/stdio_transport.cpp
     src/mcp_stdio.cpp
     src/http_server.cpp
+    src/http_web_api.cpp
+    src/http_websocket.cpp
     src/camera_stream.cpp
 )
 
@@ -74,6 +76,8 @@ add_executable(bambu-bridge-self-test
     src/stdio_transport.cpp
     src/mcp_stdio.cpp
     src/http_server.cpp
+    src/http_web_api.cpp
+    src/http_websocket.cpp
     src/camera_stream.cpp
 )
 target_include_directories(bambu-bridge-self-test PRIVATE include src)

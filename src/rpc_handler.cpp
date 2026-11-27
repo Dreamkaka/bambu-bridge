@@ -60,7 +60,8 @@ Json http_result(int r, unsigned code, const std::string& body, const char* body
 
 } // namespace
 
-Json handle_request(BambuBridge& bridge, const Json& request) {
+Json handle_request(BambuBridge& bridge, const Json& request, bool* plugin_called) {
+    if (plugin_called) *plugin_called = false;
     const Json* method = request.find("method");
     const Json* params = request.find("params");
     if (!method || method->kind != Json::String)
@@ -163,6 +164,7 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
             Json res = Json::object();
             auto w = bridge.printer_command(dev, json_str, lan, timeout_ms,
                                             (int)num_param(p, "qos", 0), (int)num_param(p, "flag", 0), wait);
+            if (plugin_called) *plugin_called = w.plugin_called;
             if (!wait) {
                 res.set("code", Json::n(w.code));
                 if (!w.error.empty()) res.set("error", Json::s(w.error));
@@ -348,9 +350,9 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
         if (m == "connect_printer") {
             return ok_num(bridge.connect_printer(str_param(p, "dev_id"), str_param(p, "dev_ip"),
                                                  str_param(p, "username", "bblp"), str_param(p, "password"),
-                                                 bool_param(p, "use_ssl", true)));
+                                                 bool_param(p, "use_ssl", true), plugin_called));
         }
-        if (m == "disconnect_printer") return ok_num(bridge.disconnect_printer());
+        if (m == "disconnect_printer") return ok_num(bridge.disconnect_printer(plugin_called));
         if (m == "start_discovery") return ok_bool(bridge.start_discovery(bool_param(p, "start", true), bool_param(p, "sending", false)));
         if (m == "install_device_cert") {
             bridge.install_device_cert(str_param(p, "dev_id"), bool_param(p, "lan_only", false));
@@ -369,7 +371,7 @@ Json handle_request(BambuBridge& bridge, const Json& request) {
         }
         if (m == "get_user_print_info" || m == "list_printers") {
             std::string body; unsigned code = 0;
-            int r = bridge.get_user_print_info(&body, &code);
+            int r = bridge.get_user_print_info(&body, &code, plugin_called);
             return http_result(r, code, body);
         }
         if (m == "get_user_tasks") {

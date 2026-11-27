@@ -25,7 +25,8 @@ namespace bambu {
 
 // Route one request. `bridge` must already be loaded (load_plugin succeeded).
 // Returns a response JSON object (see above).
-Json handle_request(BambuBridge& bridge, const Json& request);
+// Optional provenance for the Web API; does not affect the legacy JSON response.
+Json handle_request(BambuBridge& bridge, const Json& request, bool* plugin_called = nullptr);
 
 } // namespace bambu
 

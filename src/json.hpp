@@ -21,7 +21,8 @@ std::string json_dump(const Json& j);
 
 // Parse a JSON string into `out`.  Returns true on success, false on syntax
 // error.  Leading/trailing whitespace is tolerated.
-bool json_parse(const std::string& text, Json* out);
+// Strict mode uses JSON whitespace, number and string grammar for Web transports.
+bool json_parse(const std::string& text, Json* out, bool strict = false);
 
 } // namespace bambu
 

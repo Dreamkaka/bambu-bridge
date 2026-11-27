@@ -30,11 +30,12 @@ jobs:
       - name: Run self-test
         run: ./build/bambu-bridge-self-test
 
-      - name: Test cloud commands without credentials or vendor binaries
+      - name: Test cloud commands and Web API without credentials or vendor binaries
         run: |
           mkdir -p build/test-plugin
-          g++ -std=c++17 -fPIC -shared -Iinclude tests/cloud_fixture.cpp -o build/test-plugin/libbambu_networking.so
+          g++ -std=c++17 -fPIC -shared -pthread -Iinclude tests/cloud_fixture.cpp -o build/test-plugin/libbambu_networking.so
           python3 tests/cloud_commands.py build/bambu-bridge build/test-plugin
+          python3 tests/web_api.py build/bambu-bridge build/test-plugin
 
       # --- Smoke test: CLI help works ---
       - name: Smoke test CLI

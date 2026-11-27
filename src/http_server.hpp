@@ -36,7 +36,7 @@ namespace bambu {
 // On Linux/macOS call init_sockets() (no-op) before this.
 int http_listen_port();
 std::string build_login_url(const std::string& host, int port, const std::string& locale = "zh-CN");
-bool start_http_server(BambuBridge& bridge, int port, bool mcp_control, bool loopback_only);
+bool start_http_server(BambuBridge& bridge, int port, bool mcp_control, bool loopback_only, bool web_api);
 
 // Stop the server and join its thread.
 void stop_http_server();

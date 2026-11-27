@@ -1,4 +1,5 @@
 #include "mcp_stdio.hpp"
+#include "base64.hpp"
 #include "camera_stream.hpp"
 #include "json.hpp"
 #include "rpc_handler.hpp"
@@ -152,22 +153,6 @@ Json text_result(const std::string& text, bool failed = false) {
     return content_result(Json::object().set("type", Json::s("text")).set("text", Json::s(text)), failed);
 }
 
-std::string base64(const std::string& image) {
-    constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string out;
-    out.reserve((image.size() + 2) / 3 * 4);
-    for (size_t i = 0; i < image.size(); i += 3) {
-        unsigned a = static_cast<unsigned char>(image[i]);
-        unsigned b = i + 1 < image.size() ? static_cast<unsigned char>(image[i + 1]) : 0;
-        unsigned c = i + 2 < image.size() ? static_cast<unsigned char>(image[i + 2]) : 0;
-        out += alphabet[a >> 2];
-        out += alphabet[((a & 3) << 4) | (b >> 4)];
-        out += i + 1 < image.size() ? alphabet[((b & 15) << 2) | (c >> 6)] : '=';
-        out += i + 2 < image.size() ? alphabet[c & 63] : '=';
-    }
-    return out;
-}
-
 Json snapshot(BambuBridge& bridge, const Json& args) {
     if (!camera_source_ready()) return text_result("BambuSource not loaded", true);
     const auto url = resolve_camera_url(bridge, string_arg(args, "dev_id"), {}, string_arg(args, "ip"),
@@ -179,7 +164,7 @@ Json snapshot(BambuBridge& bridge, const Json& args) {
     if (capture_camera_jpeg(url, image, err) != SnapshotStatus::ok) return text_result(err, true);
     Json data;
     data.kind = Json::String;
-    data.str = base64(image);
+    data.str = base64_encode(image);
     auto block = Json::object();
     block.set("type", Json::s("image")).set("mimeType", Json::s("image/jpeg")).set("data", std::move(data));
     return content_result(std::move(block));

@@ -88,9 +88,14 @@ namespace {
 struct Parser {
     const char* p;
     const char* end;
+    bool strict = false;
     unsigned depth = 0;
 
-    bool ws() { while (p < end && std::isspace((unsigned char)*p)) ++p; return true; }
+    bool ws() {
+        while (p < end && (strict ? (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
+                                  : std::isspace(static_cast<unsigned char>(*p)))) ++p;
+        return true;
+    }
     bool eof() const { return p >= end; }
     char peek() { return p < end ? *p : '\0'; }
     bool consume(char c) { if (p < end && *p == c) { ++p; return true; } return false; }
@@ -123,15 +128,21 @@ struct Parser {
     bool parse_number(Json* out) {
         const char* start = p;
         if (peek() == '-') { ++p; }
+        const char* integer = p;
         while (p < end && std::isdigit((unsigned char)*p)) ++p;
+        if (strict && (p == integer || (*integer == '0' && p - integer > 1))) return false;
         if (p < end && *p == '.') {
             ++p;
+            const char* digits = p;
             while (p < end && std::isdigit((unsigned char)*p)) ++p;
+            if (strict && p == digits) return false;
         }
         if (p < end && (*p == 'e' || *p == 'E')) {
             ++p;
             if (p < end && (*p == '+' || *p == '-')) ++p;
+            const char* digits = p;
             while (p < end && std::isdigit((unsigned char)*p)) ++p;
+            if (strict && p == digits) return false;
         }
         if (start == p) return false;
         out->kind = Json::Number;
@@ -145,6 +156,20 @@ struct Parser {
         if (std::strncmp(p, lit, n) != 0) return false;
         p += n;
         *out = v;
+        return true;
+    }
+
+    bool parse_hex4(unsigned& code) {
+        if (end - p < 4) return false;
+        code = 0;
+        for (int k = 0; k < 4; ++k) {
+            const char h = *p++;
+            code <<= 4;
+            if (h >= '0' && h <= '9') code |= (h - '0');
+            else if (h >= 'a' && h <= 'f') code |= (h - 'a' + 10);
+            else if (h >= 'A' && h <= 'F') code |= (h - 'A' + 10);
+            else return false;
+        }
         return true;
     }
 
@@ -166,18 +191,20 @@ struct Parser {
                     case 'r':  out->push_back('\r'); break;
                     case 't':  out->push_back('\t'); break;
                     case 'u': {
-                        if (p + 4 > end) return false;
-                        unsigned code = 0;
-                        for (int k = 0; k < 4; ++k) {
-                            char h = *p++;
-                            code <<= 4;
-                            if (h >= '0' && h <= '9') code |= (h - '0');
-                            else if (h >= 'a' && h <= 'f') code |= (h - 'a' + 10);
-                            else if (h >= 'A' && h <= 'F') code |= (h - 'A' + 10);
-                            else return false;
+                        unsigned code;
+                        if (!parse_hex4(code)) return false;
+                        if (strict && code >= 0xd800 && code <= 0xdfff) {
+                            unsigned low;
+                            if (code > 0xdbff || !consume('\\') || !consume('u') || !parse_hex4(low) ||
+                                low < 0xdc00 || low > 0xdfff) return false;
+                            code = 0x10000 + ((code - 0xd800) << 10) + (low - 0xdc00);
                         }
-                        // Encode as UTF-8 (only BMP useful here)
-                        if (code < 0x80) out->push_back((char)code);
+                        if (code >= 0x10000) {
+                            out->push_back(static_cast<char>(0xf0 | (code >> 18)));
+                            out->push_back(static_cast<char>(0x80 | ((code >> 12) & 0x3f)));
+                            out->push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3f)));
+                            out->push_back(static_cast<char>(0x80 | (code & 0x3f)));
+                        } else if (code < 0x80) out->push_back((char)code);
                         else if (code < 0x800) {
                             out->push_back((char)(0xC0 | (code >> 6)));
                             out->push_back((char)(0x80 | (code & 0x3F)));
@@ -191,6 +218,7 @@ struct Parser {
                     default: return false;
                 }
             } else {
+                if (strict && static_cast<unsigned char>(c) < 0x20) return false;
                 out->push_back(c);
             }
         }
@@ -237,8 +265,8 @@ struct Parser {
 };
 } // namespace
 
-bool json_parse(const std::string& text, Json* out) {
-    Parser parser{text.data(), text.data() + text.size()};
+bool json_parse(const std::string& text, Json* out, bool strict) {
+    Parser parser{text.data(), text.data() + text.size(), strict};
     return parser.parse(out);
 }
 
