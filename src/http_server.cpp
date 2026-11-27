@@ -205,7 +205,7 @@ bool read_request(sock_t s, std::string* first_line, Headers& headers, std::stri
     return true;
 }
 
-bool send_all(sock_t s, const std::string& data) {
+bool send_all(sock_t s, std::string_view data) {
     size_t off = 0;
     while (off < data.size()) {
 #if defined(_WIN32)
@@ -787,7 +787,32 @@ void handle_conn(sock_t s) {
         if (!g_web_api) send_web_response(s, web_api_error(404, "not_found"));
         else if (!admits_web_request(s, headers, ws, false)) send_web_response(s, web_api_error(403, "forbidden_origin"));
         else if (ws) handle_websocket(s, method, version, query, headers, body, unread);
-        else send_web_response(s, dispatch_web_api(*g_bridge, method, path, query, header_value(headers, "content-type"), body));
+        else {
+            bool downloading = false;
+            const auto response = dispatch_web_api(*g_bridge, method, path, query, header_value(headers, "content-type"), body,
+                g_running, [&](std::string_view name, std::string_view bytes) {
+                    if (!downloading) {
+                        if (!set_stream_timeout(s)) return false;
+                        downloading = true;
+                        constexpr char hex[] = "0123456789ABCDEF";
+                        std::string hdr = "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\n"
+                                          "Cache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n"
+                                          "Transfer-Encoding: chunked\r\nConnection: close\r\n"
+                                          "Content-Disposition: attachment; filename=\"printer-file\"; filename*=UTF-8''";
+                        for (unsigned char c : name) { hdr += '%'; hdr += hex[c >> 4]; hdr += hex[c & 15]; }
+                        hdr += "\r\n\r\n";
+                        if (!send_all(s, hdr)) return false;
+                    }
+                    if (bytes.empty()) return true;
+                    char prefix[32];
+                    const int length = std::snprintf(prefix, sizeof(prefix), "%zx\r\n", bytes.size());
+                    return send_all(s, std::string_view(prefix, static_cast<size_t>(length))) &&
+                           send_all(s, bytes) && send_all(s, "\r\n");
+                });
+            if (!downloading) send_web_response(s, response);
+            // Missing terminal chunk tells clients that a partially sent file failed.
+            else if (response.status == 200) send_all(s, "0\r\n\r\n");
+        }
         return;
     }
 

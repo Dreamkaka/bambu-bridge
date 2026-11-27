@@ -2,6 +2,7 @@
 #include "bambu_tunnel.hpp"
 #include "bridge.hpp"
 #include "json.hpp"
+#include "printer_files.hpp"
 
 #include <cstring>
 #include <vector>
@@ -38,6 +39,7 @@ fn_Bambu_StartStreamEx     p_start_ex = nullptr;
 fn_Bambu_GetStreamCount    p_count = nullptr;
 fn_Bambu_GetStreamInfo     p_info = nullptr;
 fn_Bambu_ReadSample        p_read = nullptr;
+fn_Bambu_SendMessage       p_send = nullptr;
 fn_Bambu_Close             p_close = nullptr;
 fn_Bambu_Destroy           p_destroy = nullptr;
 fn_Bambu_Init              p_init = nullptr;
@@ -465,6 +467,7 @@ bool load_camera_source(const std::string& plugin_dir, std::string* err) {
     p_count = load_sym<fn_Bambu_GetStreamCount>(S("Bambu_GetStreamCount"));
     p_info = load_sym<fn_Bambu_GetStreamInfo>(S("Bambu_GetStreamInfo"));
     p_read = load_sym<fn_Bambu_ReadSample>(S("Bambu_ReadSample"));
+    p_send = load_sym<fn_Bambu_SendMessage>(S("Bambu_SendMessage"));
     p_close = load_sym<fn_Bambu_Close>(S("Bambu_Close"));
     p_destroy = load_sym<fn_Bambu_Destroy>(S("Bambu_Destroy"));
     p_init = load_sym<fn_Bambu_Init>(S("Bambu_Init"));
@@ -573,6 +576,89 @@ std::string resolve_ota_version(BambuBridge& bridge, const std::string& dev_id, 
     auto w = bridge.printer_command(dev_id, json_dump(cmd), false);
     v = ota_from_json(w.msg);
     return v;
+}
+
+std::string resolve_storage_cloud_url(BambuBridge& bridge, const std::string& device) {
+    if (bridge.ensure_cloud_ready(device, 15000) != 0) return {};
+    const auto firmware = resolve_ota_version(bridge, device, {});
+    std::string url;
+    if (bridge.get_camera_url(device + "|" + firmware + "|\"tutk\"", &url) != 0 ||
+        url.rfind("bambu:///tutk?", 0) != 0) return {};
+    url += "&device=" + device + "&net_ver=" + bridge.client_version();
+    if (!firmware.empty()) url += "&dev_ver=" + firmware;
+    return url;
+}
+
+namespace {
+constexpr int ctrl_type = 0x3001;
+using ControlClock = std::chrono::steady_clock;
+constexpr auto ctrl_idle_timeout = std::chrono::seconds(30);
+}
+
+FileControl::~FileControl() {
+    if (tunnel_) {
+        p_close(tunnel_);
+        p_destroy(tunnel_);
+    }
+}
+
+FileControlStatus FileControl::open(const std::string& plugin_dir, const std::string& url,
+                                    const std::atomic<bool>& running) {
+    if (!load_camera_source(plugin_dir, nullptr) || !p_send) return FileControlStatus::unavailable;
+    if (p_create(&tunnel_, url.c_str()) != Bambu_success || !tunnel_) return FileControlStatus::connect_failed;
+    if (p_set_logger && p_free_log) p_set_logger(tunnel_, bambu_log, nullptr);
+    if (p_open(tunnel_) != Bambu_success) return FileControlStatus::connect_failed;
+
+    const auto deadline = ControlClock::now() + ctrl_idle_timeout;
+    while (running) {
+        const int rc = p_start_ex ? p_start_ex(tunnel_, ctrl_type) : p_start(tunnel_, false);
+        if (rc == Bambu_success) return FileControlStatus::ok;
+        if (rc != Bambu_would_block) return FileControlStatus::connect_failed;
+        if (ControlClock::now() >= deadline) return FileControlStatus::timeout;
+        sleep_ms(50);
+    }
+    return FileControlStatus::stopped;
+}
+
+FileControlStatus FileControl::request(int command, Json req, const std::atomic<bool>& running, const Reply& on_reply) {
+    if (!running) return FileControlStatus::stopped;
+    Json envelope = Json::object();
+    envelope.set("cmdtype", Json::n(command));
+    envelope.set("sequence", Json::n(++sequence_));
+    envelope.set("req", std::move(req));
+    const auto message = json_dump(envelope);
+    if (p_send(tunnel_, ctrl_type, message.data(), static_cast<int>(message.size())) != Bambu_success)
+        return FileControlStatus::protocol_error;
+
+    auto deadline = ControlClock::now() + ctrl_idle_timeout;
+    while (running) {
+        if (ControlClock::now() >= deadline) return FileControlStatus::timeout;
+        Bambu_Sample sample{};
+        const int rc = p_read(tunnel_, &sample);
+        if (rc == Bambu_would_block) { sleep_ms(10); continue; }
+        if (rc != Bambu_success || !sample.buffer || sample.size <= 0 || sample.size > 8 * 1024 * 1024)
+            return FileControlStatus::protocol_error;
+        const std::string_view frame(reinterpret_cast<const char*>(sample.buffer), static_cast<size_t>(sample.size));
+        const auto split = frame.find("\n\n");
+        Json response;
+        if (!json_parse(std::string(frame.substr(0, split)), &response, true) || response.kind != Json::Object)
+            return FileControlStatus::protocol_error;
+        const auto* seq = response.find("sequence");
+        if (!seq || seq->kind != Json::Number || seq->num != sequence_) continue;
+        const auto* cmd = response.find("cmdtype");
+        if (cmd && (cmd->kind != Json::Number || cmd->num != command)) continue;
+        const auto* result = response.find("result");
+        if (!result || result->kind != Json::Number || result->num < -2147483648.0 || result->num > 2147483647.0)
+            return FileControlStatus::protocol_error;
+        const auto code = static_cast<int>(result->num);
+        if (code != result->num) return FileControlStatus::protocol_error;
+        const auto* reply = response.find("reply");
+        const auto data = split == std::string_view::npos ? std::string_view{} : frame.substr(split + 2);
+        if (!on_reply(code, reply ? *reply : response, data)) return FileControlStatus::stopped;
+        if (code != 1) return FileControlStatus::ok;
+        deadline = ControlClock::now() + ctrl_idle_timeout;
+    }
+    return FileControlStatus::stopped;
 }
 
 std::string resolve_camera_url(BambuBridge& bridge, const std::string& dev_id,

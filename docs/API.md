@@ -65,12 +65,30 @@ Linux：
 | `DELETE /lan/connection` | 断开当前 LAN 连接 |
 | `POST /printers/{dev_id}/status/refresh` | 传 `{"source":"cloud"}` 或 `{"source":"lan"}`，请求设备上报 |
 | `POST /printers/{dev_id}/actions/{pause,resume,stop}` | 同样指定 `source`；只允许暂停、继续、停止 |
+| `POST /printers/{dev_id}/files` | 读取打印机存储文件列表，参数见下文 |
+| `POST /printers/{dev_id}/files/download` | 下载列表中的一个文件，成功返回二进制附件 |
 
 成功返回 `{"ok":true,"result":…}`；失败返回 `{"ok":false,"error":{"code":"…"}}`，插件明确返回非零时另含 `error.plugin_code`。`202` 只表示请求已被接受，不代表设备已经执行，不应据此更新打印状态或自动重发。`409 login_required` 表示账号未登录，`503 agent_unavailable` 表示 agent 未就绪。
 
 连接 `ws://localhost:8080/api/v1/ws` 后等待首帧 `{"event":"ready","payload":{}}`，再读 `/status` 和 `/printers`，并刷新当前关注的设备。事件包括 `printer_status`（按 `dev_id`、`source` 过滤，`report` 可能只是增量）、`account_changed`、`login_result`、`cloud_connection`、`lan_connection`（`status:0` 表示已连接）。不重放历史，不因连接 WebSocket 增删 MQTT 订阅。断线后将旧设备状态标记为未确认，重连后重新读取和刷新。相机仍用现有 HTTP 接口。
 
 浏览器界面在 [`web/`](../web/)。`--web-api` 时，若当前工作目录、可执行文件所在目录，或其上一级目录中存在 `web/dist/index.html`（在 `web/` 里执行 `npm run build`），`GET /` 返回这个界面；查询里带 `ticket` 时仍走登录回调。开发时在 `web/` 执行 `npm run dev`，由 Vite 把 `/api`、`/camera.jpg`、`/camera.ts`、`/camera.html` 和 `/camera` 转发到 `http://127.0.0.1:8080`（可用环境变量 `BAMBU_BRIDGE` 改目标）。转发会改写 `Host` 与 `Origin`，否则本机接口会拒绝。Vite 只监听 `127.0.0.1`。
+
+界面第一页是「概览」：分层示意、任务进度、喷头和热床温度，以及打印机列表。层叠图按当前层／总层数绘制，不是模型预览或喷头实时位置。「数据」展示所选设备、所选通道的读数、温度曲线、画面，以及非敏感上报字段，可按名称、路径或读数搜索，左右翻页。点数值旁的趋势按钮可看近期实际样本；历史仅保留在当前页面内，单个样本不会画成走势，断线后的缓存标为未确认。「设置」用来登录、切换云端或局域网，并填写局域网地址和画面协议。
+
+#### 打印机文件
+
+局域网文件服务使用独立连接，不依赖局域网 MQTT 已连通。云端需要登录，且打印机已绑定并支持 TUTK。
+
+两个接口都要求 `source`（`lan` / `cloud`）、`storage`（`external` / `internal`）、`type`（`model` / `timelapse` / `video`）。局域网还需要 `dev_ip`、`password`，只放在 JSON 请求体中；云端不接受这两个字段。例如：
+
+```json
+{"source":"lan","dev_ip":"192.168.1.10","password":"ACCESS_CODE","storage":"external","type":"model"}
+```
+
+列表返回 `{"ok":true,"result":{"files":[…]}}`。每项有 `name`，打印机提供时还有 `path`、`size`（字节）、`time`（Unix 秒）或 `date`。下载时在同一组筛选参数中加 `path`；若列表项没有 `path`，则加 `name`。下载前会重读该列表；文件已移走时返回 `404 file_not_found`。成功返回 `200 application/octet-stream`、`Content-Disposition: attachment` 和分块二进制内容，单文件上限 512 MiB。若传输中断，HTTP 响应缺少终止块，客户端不应保存为完整文件。
+
+实现使用 Open Bamboo Networking 的 [BambuSource CTRL 文件浏览接口](https://github.com/ClusterM/open-bamboo-networking/blob/master/research/09.05-ctrl.md)：局域网走 TLS 6000，支持的插件可按自身配置使用 FTPS；云端走 TUTK，不是云端打印历史。使用 Open Bamboo Networking 时，云端文件访问需要 `block_cloud = 0`、支持 TUTK CTRL 的 `BambuSource` 和用户自行提供的 slicer 证书配置；如果需要离开局域网访问，不要启用 `force_ftps`。不同固件可用的存储及文件类型不同，部分机型能列出内部模型但禁止下载。接口只读，不提供上传或删除。
 
 
 证书是 OrcaSlicer 自带的 DigiCert 公钥证书，用于插件校验 `*.bambulab.com` HTTPS，**不需要也不应该去偷任何私钥**。

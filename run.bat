@@ -17,5 +17,5 @@ if not exist "%PLUGIN_DIR%\bambu_networking.dll" (
     exit /b 1
 )
 
-"%BRIDGE%" --plugin-dir "%PLUGIN_DIR%" --http 8080 --no-stdio %*
+"%BRIDGE%" --plugin-dir "%PLUGIN_DIR%" --http 8080 --no-stdio --web-api %*
 exit /b %errorlevel%

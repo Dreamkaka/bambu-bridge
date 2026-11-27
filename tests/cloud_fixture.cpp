@@ -1,6 +1,7 @@
 // In-process test peer for the Open Bamboo publish/report contract. No sockets.
 #include "bambu_abi.hpp"
 #include <mutex>
+#include <string_view>
 
 #ifdef _WIN32
 #define EXPORT extern "C" __declspec(dllexport)
@@ -86,7 +87,26 @@ EXPORT int bambu_network_send_message(void* p, std::string id, std::string comma
         report(id, R"({"print":{"command":"push_status"}})");
         report(id, R"({"info":{"command":"get_version","sequence_id":"6"}})");
         if (id == "online") report(id, R"({"info":{"command":"get_version","sequence_id":7,"module":[]}})");
+        if (id == "storage-fixture") {
+            constexpr std::string_view prefix = "\"sequence_id\":\"";
+            const auto pos = command.find(prefix);
+            if (pos == std::string::npos) return -1;
+            const auto start = pos + prefix.size();
+            const auto seq = command.substr(start, command.find('"', start) - start);
+            report(id, "{\"info\":{\"command\":\"get_version\",\"sequence_id\":\"" + seq +
+                       "\",\"module\":[{\"name\":\"ota\",\"sw_ver\":\"01.02.03.04\"}]}}");
+        }
     }
+    return 0;
+}
+
+EXPORT int bambu_network_get_camera_url(void*, std::string key, std::function<void(std::string)> callback) {
+    const auto split = key.find('|');
+    const auto id = key.substr(0, split);
+    if (key == "storage-fixture|01.02.03.04|\"tutk\"" || id == "online")
+        callback("bambu:///tutk?uid=fixture");
+    else
+        callback("bambu:///local/192.0.2.10?port=6000");
     return 0;
 }
 

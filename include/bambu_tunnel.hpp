@@ -52,6 +52,7 @@ typedef int (*fn_Bambu_StartStreamEx)(Bambu_Tunnel tunnel, int type);
 typedef int (*fn_Bambu_GetStreamCount)(Bambu_Tunnel tunnel);
 typedef int (*fn_Bambu_GetStreamInfo)(Bambu_Tunnel tunnel, int index, Bambu_StreamInfo* info);
 typedef int (*fn_Bambu_ReadSample)(Bambu_Tunnel tunnel, Bambu_Sample* sample);
+typedef int (*fn_Bambu_SendMessage)(Bambu_Tunnel tunnel, int type, const char* data, int len);
 typedef void (*fn_Bambu_Close)(Bambu_Tunnel tunnel);
 typedef void (*fn_Bambu_Destroy)(Bambu_Tunnel tunnel);
 typedef int (*fn_Bambu_Init)();
