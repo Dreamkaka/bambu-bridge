@@ -24,6 +24,10 @@ struct WebApiResponse {
 // Download callbacks are invoked only on validated chunks. A successful
 // download (including an empty file) invokes the sink at least once.
 using WebFileSink = std::function<bool(std::string_view name, std::string_view bytes)>;
+
+enum class FileOperation { list, download, remove, thumbnail };
+WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, FileOperation operation, const Json& input,
+                             const std::atomic<bool>& running, const WebFileSink& sink = {});
 WebApiResponse dispatch_web_api(BambuBridge& bridge, std::string_view method, std::string_view path,
                                 std::string_view query, std::string_view content_type, const std::string& body,
                                 const std::atomic<bool>& running, const WebFileSink& file_sink);

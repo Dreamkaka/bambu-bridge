@@ -18,6 +18,7 @@ import {
   trayPlace,
   type Json,
 } from './logic';
+import { amsEnvironment, mountedTools, rackToolLabel, toolAddress } from './overview-hardware';
 import { store } from './store';
 
 let busy = '';
@@ -48,6 +49,13 @@ function slotCard(title: string, type: string, remain: number | null, color: str
   return `<div class="slot${current ? ' is-now' : ''}"${style}${current ? ' aria-current="true"' : ''}><b>${esc(title)}</b><span>${esc(type || '空槽')}</span><span class="ef-field">${esc(rest)}</span></div>`;
 }
 
+function amsEnvironmentRow(label: string, report: Record<string, Json>): string {
+  const { temperature, humidity, level } = amsEnvironment(report);
+  const tempText = temperature === null ? '温度未上报' : `温度 ${temperature} ℃`;
+  const humidityText = humidity !== null ? `湿度 ${humidity}%` : level !== null ? `湿度档 ${level} / 5` : '湿度未上报';
+  return `<li><b>${esc(label)}</b><span>${tempText}</span><span>${humidityText}</span></li>`;
+}
+
 function sideMarkup(report: { [key: string]: Json }, now: string): string {
   const cards: string[] = [];
   const ams = obj(report.ams);
@@ -56,14 +64,21 @@ function sideMarkup(report: { [key: string]: Json }, now: string): string {
   for (const unit of units) {
     const record = obj(unit);
     if (!record) continue;
-    const id = str(record.id) ?? '';
-    const temp = num(record.temp);
-    const humidity = str(record.humidity) ?? (num(record.humidity) != null ? String(num(record.humidity)) : '');
-    if (id) notes.push(`AMS ${id}${temp != null ? ` / ${temp} ℃` : ''}${humidity ? ` / 湿度档 ${humidity}` : ''}`);
+    const id = str(record.id) ?? String(num(record.id) ?? '');
+    const label = id ? `AMS ${id}` : 'AMS';
+    const zones = Array.isArray(record.zone_info) ? record.zone_info : [];
+    const zoneRows = zones.flatMap(raw => {
+      const zone = obj(raw);
+      const zoneId = num(zone?.zone_id);
+      return zone && zoneId !== null && Number.isInteger(zoneId) && zoneId >= 0
+        ? [amsEnvironmentRow(`${label} / 分区 ${zoneId}`, zone)] : [];
+    });
+    if (zoneRows.length) notes.push(...zoneRows);
+    else notes.push(amsEnvironmentRow(label, record));
     const trays = Array.isArray(record.tray) ? record.tray : [];
     trays.forEach((tray, index) => {
       const item = obj(tray);
-      const slot = item ? str(item.id) ?? String(index) : String(index);
+      const slot = str(item?.id) ?? String(num(item?.id) ?? index);
       const unitNum = /^\d+$/.test(id) ? Number(id) : Number.NaN;
       const slotNum = /^\d+$/.test(slot) ? Number(slot) : Number.NaN;
       const flat = unitNum >= 0 && unitNum < 16 && slotNum >= 0 && slotNum < 4 ? String(unitNum * 4 + slotNum) : '';
@@ -90,8 +105,9 @@ function sideMarkup(report: { [key: string]: Json }, now: string): string {
       cards.push(slotCard(title, type, num(item.remain), colorHex(item.tray_color ?? null), now !== '255' && now === id));
     }
   }
-  if (!cards.length) return '<p class="ef-empty">这台机器还没有上报耗材槽。有 AMS 或外挂料盘时，槽位会列在这里。</p>';
-  return `${notes.length ? `<p class="ef-field">${esc(notes.join(' / '))}</p>` : ''}<div class="slots">${cards.join('')}</div>`;
+  const environment = notes.length ? `<ul class="ams-environment ef-field" aria-label="AMS 温湿度">${notes.join('')}</ul>` : '';
+  const listing = cards.length ? `<div class="slots">${cards.join('')}</div>` : '<p class="ef-empty">这台机器还没有上报耗材槽。有 AMS 或外挂料盘时，槽位会列在这里。</p>';
+  return environment + listing;
 }
 
 
@@ -130,21 +146,26 @@ function unpackTemp(value: Json | undefined) {
 
 function toolMarkup(report: { [key: string]: Json }): string {
   const device = obj(report.device);
+  const { mounted, empty } = mountedTools(report);
   for (const group of ['nozzle', 'extruder']) {
     const info = obj(device?.[group])?.info;
     if (!Array.isArray(info)) continue;
     const slots = info.flatMap((raw, index) => {
       const item = obj(raw);
       if (!item) return [];
-      const addr = num(item.addr_id);
-      const label = addr != null ? `T${String(addr + 1).padStart(2, '0')}` : `${group === 'nozzle' ? '喷嘴' : '挤出机'} ${num(item.id) ?? index}`;
+      const addr = toolAddress(item);
+      const label = addr !== null ? rackToolLabel(addr) : `${group === 'nozzle' ? '喷嘴' : '挤出机'} ${num(item.id) ?? index}`;
       const temp = unpackTemp(item.temp);
       const size = num(item.diameter);
       const color = colorHex(item.color_m ?? null);
       const path = `device.${group}.info[${index}].temp`;
-      return [`<div class="tool-cell"${color ? ` style="--material:${color}"` : ''}><b>${label}</b><strong>${temp?.current ?? '—'} ℃</strong><span>${size == null ? '—' : `${size} mm`}</span><small>${esc(str(item.type) || '')}</small><button class="inspect" type="button" data-path="${path}">字段</button></div>`];
+      const clamped = group === 'nozzle' && mounted.has(index);
+      return [`<div class="tool-cell"${color ? ` style="--material:${color}"` : ''}><b>${label}</b>${clamped ? '<small class="ef-state is-alert tool-clamped">已夹取</small>' : ''}<strong>${temp?.current ?? '—'} ℃</strong><span>${size == null ? '—' : `${size} mm`}</span><small>${esc(str(item.type) || '')}</small><button class="inspect" type="button" data-path="${path}">字段</button></div>`];
     });
-    if (slots.length) return slots.join('');
+    if (slots.length) {
+      const status = empty ? '未夹取工具头' : mounted.size === 0 ? '夹取状态未上报' : '';
+      return `${status ? `<p class="ef-field tool-mount-status">${status}</p>` : ''}${slots.join('')}`;
+    }
   }
   const t = num(report.nozzle_temper), size = num(report.nozzle_diameter), target = num(report.nozzle_target_temper);
   return `<div class="tool-cell"><b>喷嘴</b><strong>${t ?? '—'} ℃</strong><span>${size == null ? '—' : `${size} mm`}</span><small>目标 ${target ?? '—'} ℃</small><button class="inspect" type="button" data-path="nozzle_temper">字段</button></div>`;

@@ -37,7 +37,7 @@ void usage(const char* prog) {
         "  --stdio                  Enable stdio JSON-RPC mode (default: enabled if --http not given)\n"
         "  --no-stdio               Disable stdio JSON-RPC mode\n"
         "  --mcp                   Serve MCP over stdio instead of HTTP/legacy stdio\n"
-        "  --mcp-enable-control    Expose pause, resume and stop tools in MCP mode\n"
+        "  --mcp-enable-control    Expose print controls and file deletion in MCP mode\n"
         "  --help                   Show this help\n",
         prog);
 }

@@ -120,7 +120,7 @@ curl -s -X POST http://127.0.0.1:8080/api/pushall \
 |------|------|
 | `ams[].id` | 单元 id，字符串 |
 | `ams[].humidity` | 湿度档 `1`–`5`（1 最干，5 最湿）。普通 AMS 只有档位 |
-| `ams[].humidity_raw` | 相对湿度百分比。AMS 2 / HT 才有 |
+| `ams[].humidity_raw` | 相对湿度百分比；没有此字段时只显示湿度档 |
 | `ams[].temp` | 仓温 ℃ |
 | `ams[].dry_time` | 剩余烘干时间（秒，能烘干的型号） |
 | `ams[].tray[]` | 四槽（HT 一槽）。空槽通常 `remain=-1` 且 `tray_type` 空 |
@@ -128,6 +128,10 @@ curl -s -X POST http://127.0.0.1:8080/api/pushall \
 | `tray_now` / `tray_tar` | 当前 / 目标扁平槽 |
 | `insert_flag` | 插入时读 RFID（对应 `ams_user_setting.tray_read_option`） |
 | `power_on_flag` | 开机读 RFID |
+
+AMS 3H 可在 `ams[].zone_info[]` 中按 `zone_id` 上报分区环境。每区独立读取 `temp`、`humidity_raw`（百分比）或 `humidity`（档位），不要用整机读数填补缺失的分区读数。见 [Bambu Studio 的 AMS 解析](https://github.com/bambulab/BambuStudio/blob/master/src/slic3r/GUI/DeviceCore/DevFilaSystem.cpp)。
+
+概览中的「已夹取」与 AMS 当前进料不是同一个状态：`print.device.nozzle.info[].id` 的 `0x0n` 表示挤出机位置，`0x1n` 表示机架位置；`addr_id` 用来保留同一工具头的槽位编号。`nozzle.exist` 和对应挤出机的 `info` 装载位用来排除空夹具，不使用 `src_id` 或 `tar_id` 判定已夹取。见 [喷嘴位置解析](https://github.com/bambulab/BambuStudio/blob/master/src/slic3r/GUI/DeviceCore/DevNozzleSystem.cpp) 和 [挤出机装载状态](https://github.com/bambulab/BambuStudio/blob/master/src/slic3r/GUI/DeviceCore/DevExtruderSystem.cpp)。
 
 外挂盘在 `print.vt_tray`（单头）或 `print.vir_slot[]`（双头，`id` 为 `"255"` / `"254"`），字段与 AMS tray 相同。
 

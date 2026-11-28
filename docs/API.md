@@ -45,7 +45,7 @@ Linux：
 | `--stdio` | 开 stdin/stdout JSON-RPC | 未指定 `--http` 时默认开 |
 | `--no-stdio` | 只开 HTTP | |
 | `--mcp` | 供 MCP 客户端启动的标准 stdio 服务；不能与 `--stdio` 或启用的 HTTP 同时使用 | 关闭 |
-| `--mcp-enable-control` | 在 MCP 工具列表额外启用暂停、恢复、停止 | 关闭 |
+| `--mcp-enable-control` | 在 MCP 工具列表额外启用暂停、恢复、停止和文件删除 | 关闭 |
 | `--help` | 帮助 | |
 
 直接启动二进制时，`--plugin-dir` 缺失或加载失败会退出。Windows x64 的 `run.bat` 会自动传入随附插件目录，并默认监听 HTTP `8080`；可以用 `--http <port>` 覆盖。云配置见 [README 的运行说明](../README.md#运行)。
@@ -347,9 +347,17 @@ HTTP 服务启用后，在本机 MCP 客户端选择 **Streamable HTTP**，连�
 | `printer_status` | `dev_id` | 通过云连接请求打印机完整状态 |
 | `printer_firmware` | `dev_id` | 通过云连接查询打印机固件版本 |
 | `camera_snapshot` | `dev_id`；可选 `ip`、`password`、`proto`、`dev_ver` | 返回 MCP `image` 内容（Base64 JPEG）；提供 `ip` 走 LAN，否则走云端 |
+| `list_printer_files` | `dev_id`、`source`、`storage`、`type`；LAN 加 `dev_ip`、`password` | 列出打印机存储中文件 |
+| `printer_file_thumbnail` | 同上，加 `path` 或 `name`；可选 `plate`、`include_metadata` | 返回 MCP `image`；请求元数据时另返回一条 JSON 文本 |
+| `download_printer_file` | 同列表，加 `path` 或 `name` | 保存到 Bridge 主机的临时目录，返回 `local_path`、`name`、`size` |
+| `delete_printer_file` | 同列表，加 `path` 或 `name`、`confirm: true` | 永久删除单个文件；仅在 `--mcp-enable-control` 下可调用 |
 | `pause_print`、`resume_print`、`stop_print` | `dev_id` | 通过云连接控制打印；仅在 `--mcp-enable-control` 下可调用 |
 
-除截图外，工具以 `text` 内容返回现有 RPC 的 JSON 结果。插件报错或等待回执超时会标记 `isError: true`；超时不代表打印机没有收到命令。MCP 不暴露任意 G-code、原始 MQTT 或登录凭据接口。
+文件工具使用[打印机文件接口](#打印机文件)的参数取值。对单个文件操作时，优先传列表返回的 `path`，只有未返回 `path` 才传 `name`。`download_printer_file` 流式写入独立的临时子目录，不覆盖现有文件，也不把原文件塞进 MCP 消息；上限 512 MiB。失败时清理不完整的文件，成功后由调用方移动或清理。路径是 Bridge 进程所在系统的路径，并非远程客户端的文件。
+
+删除前，Agent 应向用户展示准确的打印机和文件并获得确认，再传 `confirm: true`。删除超时后先重新读取文件列表，不要自动重试。
+
+除了图片，工具使用 MCP `text` 内容返回 JSON 结果。插件报错或等待回执超时会标记 `isError: true`；超时不代表打印机没有收到命令。MCP 不暴露任意 G-code、原始 MQTT 或登录凭据接口。
 
 云端工具需要先在 HTTP 模式登录。同一系统用户下，HTTP 和 MCP 使用相同的默认配置目录，无需指定 `--config-dir`。如果登录时指定了自定义目录或非默认 `--country`，MCP 启动时沿用即可。
 

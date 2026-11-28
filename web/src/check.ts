@@ -7,6 +7,7 @@ import {
   seriesPoints,
   type Sample,
 } from './logic.ts';
+import { amsEnvironment, mountedTools, rackToolLabel, toolAddress } from './overview-hardware.ts';
 
 function assert(cond: unknown, message: string): asserts cond {
   if (!cond) throw new Error(message);
@@ -42,5 +43,28 @@ assert(seriesPoints(samples) === null, 'one sample is not a trend');
 pushSample(samples, 12, 6000);
 const points = seriesPoints(samples);
 assert(points?.length === 2 && points[1].y < points[0].y, 'two samples draw a rising line');
+
+const env = amsEnvironment({ temp: '26.5', humidity: '4', humidity_raw: '45' });
+assert(env.temperature === 26.5 && env.humidity === 45, 'AMS displays temperature and measured RH, not the grade as a percent');
+const legacyEnv = amsEnvironment({ temp: -1, humidity: 3, humidity_raw: -1 });
+assert(legacyEnv.temperature === null && legacyEnv.humidity === null && legacyEnv.level === 3, 'invalid AMS readings fall back to humidity grade');
+assert(amsEnvironment({ humidity_raw: 0 }).humidity === 0, 'zero RH is a valid reading');
+
+const picked = { id: 0, addr_id: 2 };
+const racked = { id: 0x10, addr_id: 0 };
+const holding = mountedTools({ device: {
+  nozzle: { exist: (1 << 16) | 1, info: [racked, picked], src_id: 0x13, tar_id: 0x10 },
+  extruder: { info: [{ id: 0, hnow: 0, info: 8 }] },
+} });
+const address = toolAddress(picked);
+assert(holding.mounted.size === 1 && holding.mounted.has(1) && address !== null && rackToolLabel(address) === 'T03', 'mounted position and rack address are different identifiers');
+const returned = mountedTools({ device: {
+  nozzle: { info: [racked, { id: 0x12, addr_id: 2 }], tar_id: 0x12 },
+  extruder: { info: [{ id: 0, hnow: 0, info: 0 }] },
+} });
+assert(returned.mounted.size === 0 && returned.empty, 'a rack target is not a mounted nozzle');
+const blocked = mountedTools({ device: { nozzle: { info: [picked], exist: 0 }, extruder: { info: [{ id: 0, info: 8 }] } } });
+assert(blocked.mounted.size === 0 && !blocked.empty, 'exist mask rejects a stale mounted position without falsely declaring the clamp empty');
+assert(!mountedTools({ nozzle_temper: 20 }).empty, 'legacy temperature alone does not indicate an empty clamp');
 
 console.log('web checks ok');

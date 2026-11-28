@@ -118,7 +118,6 @@ WebApiResponse project_printers(const std::string& body) {
 constexpr double max_file_size = 512 * 1024 * 1024;
 constexpr size_t max_file_count = 10000;
 constexpr size_t max_thumbnail_size = 256 * 1024;
-enum class FileOperation { list, download, remove, thumbnail };
 
 bool file_text(std::string_view text, size_t limit) {
     return !text.empty() && text.size() <= limit && websocket_utf8_valid(text) &&
@@ -165,8 +164,12 @@ WebApiResponse control_error(FileControlStatus status, int printer_code) {
     return response;
 }
 
+} // namespace
+
 WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, FileOperation operation, const Json& input,
                              const std::atomic<bool>& running, const WebFileSink& sink) {
+    if (!is_web_device_id(id)) return web_api_error(400, "invalid_device_id");
+    if (operation == FileOperation::download && !sink) return web_api_error(500, "internal_error");
     const auto* source = field(input, "source", Json::String);
     const auto* storage = field(input, "storage", Json::String);
     const auto* type = field(input, "type", Json::String);
@@ -404,8 +407,6 @@ WebApiResponse printer_files(BambuBridge& bridge, std::string_view id, FileOpera
     if (status != FileControlStatus::ok) return control_error(status, printer_code);
     return {200, {}, {}};
 }
-
-} // namespace
 
 WebApiResponse dispatch_web_api(BambuBridge& bridge, std::string_view method, std::string_view path,
                                 std::string_view query, std::string_view content_type, const std::string& body,

@@ -518,7 +518,7 @@ void handle_mcp(sock_t s, const std::string& method, const Headers& headers, con
         return reject(415, "MCP expects application/json");
     if (headers.count("accept") && !accepts_json(header("accept")))
         return reject(406, "MCP responses use application/json");
-    const auto response = dispatch_mcp_http(*g_bridge, body, g_mcp_control);
+    const auto response = dispatch_mcp_http(*g_bridge, body, g_mcp_control, g_running);
     send_response(s, response.empty() ? 202 : 200, "application/json", response, true);
 }
 

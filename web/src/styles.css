@@ -40,6 +40,10 @@
 .tool-cell { display: grid; align-content: start; gap: 0.1rem; padding: 0.4rem; border-top: 3px solid var(--material,var(--ef-rule)); background: var(--ef-chip); font-variant-numeric: tabular-nums; }
 .tool-cell span, .tool-cell small, .job-facts dt { color: var(--ef-ink-2); font-size: 0.8rem; }
 .tool-cell strong { font-size: 1.1rem; }
+.tool-cell .tool-clamped { justify-self: start; color: var(--ef-on-signal); }
+.tool-mount-status { grid-column: 1 / -1; margin: 0; }
+.ams-environment { margin: 0 0 0.5rem; padding: 0; list-style: none; }
+.ams-environment li { display: flex; flex-wrap: wrap; gap: 0.15rem 0.7rem; padding-block: 0.25rem; border-bottom: 1px solid var(--ef-rule); }
 .job-progress { display: flex; align-items: center; gap: 1rem; padding-block: 0.9rem; }
 .job-progress .ef-progress { flex: 1; }
 .job-progress .ef-progress i { --cells: 20; }

@@ -3,9 +3,17 @@
 #include "camera_stream.hpp"
 #include "json.hpp"
 #include "rpc_handler.hpp"
+#include "http_web_api.hpp"
 
 #include <cmath>
+#include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <initializer_list>
 #include <iostream>
+#ifdef _WIN32
+#  include <random>
+#endif
 #include <string_view>
 
 #ifdef _WIN32
@@ -52,6 +60,7 @@ struct Tool {
     const char* description;
     Args args;
     bool control = false;
+    std::optional<FileOperation> file = std::nullopt;
 };
 constexpr Tool tools[] = {
     {"bridge_status", "status", "Read bridge and cloud connection status.", Args::none},
@@ -59,6 +68,10 @@ constexpr Tool tools[] = {
     {"printer_status", "pushall", "Request a full status report from the printer.", Args::printer},
     {"printer_firmware", "get_version", "Read printer firmware versions.", Args::printer},
     {"camera_snapshot", nullptr, "Capture one JPEG frame from the printer camera.", Args::camera},
+    {"list_printer_files", nullptr, "List files on printer storage, not cloud print history.", Args::none, false, FileOperation::list},
+    {"printer_file_thumbnail", nullptr, "Read a printer file thumbnail and optional model metadata.", Args::none, false, FileOperation::thumbnail},
+    {"download_printer_file", nullptr, "Save one printer file to a unique local path on the Bridge host and return that path.", Args::none, false, FileOperation::download},
+    {"delete_printer_file", nullptr, "Permanently delete one file from printer storage. Show the exact printer and file and obtain explicit user confirmation before calling.", Args::none, true, FileOperation::remove},
     {"pause_print", "pause", "Pause the active print. Ask the user to confirm before calling.", Args::printer, true},
     {"resume_print", "resume", "Resume a paused print. Ask the user to confirm before calling.", Args::printer, true},
     {"stop_print", "stop", "Cancel the active print. Ask the user to confirm before calling.", Args::printer, true},
@@ -92,27 +105,73 @@ void for_fields(Args args, Fn fn) {
     if (args == Args::camera) for (const auto& field : camera_fields) fn(field);
 }
 
+Json storage_schema(FileOperation operation) {
+    auto props = Json::object(), required = Json::array();
+    auto add = [&](const char* key, const char* kind, const char* desc, bool needed = false) -> Json& {
+        if (needed) required.arr.push_back(Json::s(key));
+        props.set(key, Json::object().set("type", Json::s(kind)).set("description", Json::s(desc)));
+        return *props.find(key);
+    };
+    auto choices = [](std::initializer_list<const char*> values) {
+        auto result = Json::array();
+        for (const auto* value : values) result.arr.push_back(Json::s(value));
+        return result;
+    };
+    add("dev_id", "string", "Printer serial number.", true).set("pattern", Json::s("^[A-Za-z0-9_-]{1,64}$"));
+    add("source", "string", "Cloud uses the signed-in account; LAN requires dev_ip and password.", true)
+        .set("enum", choices({"cloud", "lan"}));
+    add("storage", "string", "Printer storage volume.", true).set("enum", choices({"external", "internal"}));
+    add("type", "string", "File category.", true).set("enum", choices({"model", "timelapse", "video"}));
+    add("dev_ip", "string", "Printer IPv4 address for LAN only.");
+    add("password", "string", "LAN access code; do not include it in user-visible responses.");
+    if (operation != FileOperation::list) {
+        add("path", "string", "Exact path from list_printer_files. Supply path or name, never both.");
+        add("name", "string", "Exact file name, only if list_printer_files did not return a path.");
+    }
+    if (operation == FileOperation::thumbnail) {
+        add("plate", "integer", "Model plate number; model files only.")
+            .set("minimum", Json::n(1)).set("maximum", Json::n(256)).set("default", Json::n(1));
+        add("include_metadata", "boolean", "Also return file details and available 3MF metadata (Base64).");
+    }
+    if (operation == FileOperation::remove)
+        add("confirm", "boolean", "Set true only after the user explicitly confirms permanent deletion.", true)
+            .set("const", Json::boolean(true));
+    auto schema = Json::object();
+    schema.set("type", Json::s("object")).set("properties", std::move(props))
+          .set("required", std::move(required)).set("additionalProperties", Json::boolean(false));
+    if (operation != FileOperation::list) {
+        auto refs = Json::array();
+        refs.arr.push_back(Json::object().set("required", choices({"path"})));
+        refs.arr.push_back(Json::object().set("required", choices({"name"})));
+        schema.set("oneOf", std::move(refs));
+    }
+    return schema;
+}
+
 Json list_tools(bool enable_control) {
     auto list = Json::array();
     for (const auto& tool : tools) {
         if (tool.control && !enable_control) continue;
-        auto props = Json::object();
-        auto required = Json::array();
-        for_fields(tool.args, [&](const Field& field) {
-            auto schema = Json::object();
-            schema.set("type", Json::s("string")).set("description", Json::s(field.description));
-            if (std::string_view(field.name) == "dev_id") {
-                schema.set("minLength", Json::n(1));
-                required.arr.push_back(Json::s(field.name));
-            }
-            props.set(field.name, std::move(schema));
-        });
-        auto input = Json::object();
-        input.set("type", Json::s("object")).set("properties", std::move(props))
-             .set("required", std::move(required)).set("additionalProperties", Json::boolean(false));
+        auto input = tool.file ? storage_schema(*tool.file) : Json::object();
+        if (!tool.file) {
+            auto props = Json::object();
+            auto required = Json::array();
+            for_fields(tool.args, [&](const Field& field) {
+                auto schema = Json::object();
+                schema.set("type", Json::s("string")).set("description", Json::s(field.description));
+                if (std::string_view(field.name) == "dev_id") {
+                    schema.set("minLength", Json::n(1));
+                    required.arr.push_back(Json::s(field.name));
+                }
+                props.set(field.name, std::move(schema));
+            });
+            input.set("type", Json::s("object")).set("properties", std::move(props))
+                 .set("required", std::move(required)).set("additionalProperties", Json::boolean(false));
+        }
         auto hints = Json::object();
-        hints.set("readOnlyHint", Json::boolean(!tool.control))
-             .set("destructiveHint", Json::boolean(std::string_view(tool.name) == "stop_print"))
+        hints.set("readOnlyHint", Json::boolean(!tool.control && tool.file != FileOperation::download))
+             .set("destructiveHint", Json::boolean(tool.file == FileOperation::remove ||
+                                                  std::string_view(tool.name) == "stop_print"))
              .set("openWorldHint", Json::boolean(true));
         list.arr.push_back(Json::object().set("name", Json::s(tool.name))
                                         .set("description", Json::s(tool.description))
@@ -170,7 +229,123 @@ Json snapshot(BambuBridge& bridge, const Json& args) {
     return content_result(std::move(block));
 }
 
-Json call_tool(BambuBridge& bridge, const Tool& tool, const Json& args) {
+namespace fs = std::filesystem;
+
+fs::path create_download_dir() {
+    const auto base = fs::temp_directory_path();
+#ifdef _WIN32
+    std::random_device random;
+    for (int i = 0; i < 8; ++i) {
+        auto dir = base / ("bambu-bridge-" + std::to_string(random()) + "-" + std::to_string(random()));
+        if (fs::create_directory(dir)) return dir;
+    }
+    return {};
+#else
+    auto pattern = (base / "bambu-bridge-XXXXXX").native();
+    if (!mkdtemp(pattern.data())) return {};
+    return fs::path(std::move(pattern));
+#endif
+}
+
+struct LocalDownload {
+    fs::path directory, path;
+    std::ofstream stream;
+    std::string name;
+    size_t size = 0;
+    bool failed = false, keep = false;
+
+    ~LocalDownload() {
+        if (keep || directory.empty()) return;
+        if (stream.is_open()) stream.close();
+        std::error_code ignored;
+        if (!path.empty()) fs::remove(path, ignored);
+        fs::remove(directory, ignored);
+    }
+
+    bool append(std::string_view filename, std::string_view bytes) {
+        if (!stream.is_open()) {
+            directory = create_download_dir();
+            if (directory.empty()) { failed = true; return false; }
+            name = filename;
+            // The printer's filename is display data, never a writable host path.
+            path = directory / "download";
+            const auto dot = filename.find_last_of('.');
+            if (dot != filename.npos) {
+                const auto suffix = filename.substr(dot + 1);
+                if (!suffix.empty() && suffix.size() <= 10 &&
+                    suffix.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") == suffix.npos)
+                    path += filename.substr(dot);
+            }
+            stream.open(path, std::ios::binary);
+        }
+        if (!bytes.empty()) stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        if (!stream) { failed = true; return false; }
+        size += bytes.size();
+        return true;
+    }
+};
+
+Json call_file_tool(BambuBridge& bridge, FileOperation op, const Json& args, const std::atomic<bool>& running) {
+    const auto& device = string_arg(args, "dev_id");
+    Json input = Json::object();
+    bool saw_id = false, confirmed = false;
+    for (const auto& kv : args.obj) {
+        if (kv.first == "dev_id") {
+            if (saw_id) return text_result("Duplicate dev_id", true);
+            saw_id = true;
+        } else if (kv.first == "confirm") {
+            if (op != FileOperation::remove || confirmed || kv.second.kind != Json::Bool || !kv.second.b)
+                return text_result("Deletion requires explicit user confirmation (confirm: true)", true);
+            confirmed = true;
+        } else {
+            input.obj.push_back(kv);
+        }
+    }
+    if (op == FileOperation::remove && !confirmed)
+        return text_result("Deletion requires explicit user confirmation (confirm: true)", true);
+
+    LocalDownload download;
+    auto response = printer_files(bridge, device, op, input, running,
+        [&](std::string_view name, std::string_view bytes) { return download.append(name, bytes); });
+    if (download.failed) return text_result("Could not write a local download on the Bridge host", true);
+    if (response.status != 200) {
+        const auto* error = response.body.find("error");
+        return text_result(error ? json_dump(*error) : "Printer storage request failed", true);
+    }
+    if (op == FileOperation::download) {
+        if (!download.stream.is_open()) return text_result("Printer did not send a file", true);
+        download.stream.close();
+        if (!download.stream) return text_result("Could not finish the local download on the Bridge host", true);
+        auto result = text_result(json_dump(Json::object().set("local_path", Json::s(download.path.u8string()))
+            .set("name", Json::s(download.name)).set("size", Json::n(static_cast<double>(download.size)))));
+        download.keep = true;
+        return result;
+    }
+    if (response.image) {
+        return content_result(Json::object().set("type", Json::s("image"))
+            .set("mimeType", Json::s(response.image->content_type)).set("data", Json::s(base64_encode(response.image->bytes))));
+    }
+    auto* result = response.body.find("result");
+    if (!result) return text_result("Printer storage response was incomplete", true);
+    if (auto* thumbnail = result->find("thumbnail")) {
+        auto* mime = thumbnail->find("content_type");
+        auto* data = thumbnail->find("data_base64");
+        if (!mime || !data) return text_result("Printer storage response was incomplete", true);
+        auto block = Json::object();
+        block.set("type", Json::s("image")).set("mimeType", std::move(*mime)).set("data", std::move(*data));
+        auto metadata = Json::object();
+        for (auto& field : result->obj)
+            if (field.first != "thumbnail") metadata.obj.push_back(std::move(field));
+        auto combined = content_result(std::move(block));
+        combined.find("content")->arr.push_back(Json::object().set("type", Json::s("text"))
+                                                              .set("text", Json::s(json_dump(metadata))));
+        return combined;
+    }
+    return text_result(json_dump(*result));
+}
+
+Json call_tool(BambuBridge& bridge, const Tool& tool, const Json& args, const std::atomic<bool>& running) {
+    if (tool.file) return call_file_tool(bridge, *tool.file, args, running);
     if (auto error = validate_args(tool, args); !error.empty()) return text_result(error, true);
     if (!tool.rpc) return snapshot(bridge, args);
     auto response = handle_request(bridge, Json::object().set("method", Json::s(tool.rpc)).set("params", args));
@@ -196,7 +371,8 @@ Json rpc_error(const Json& id, int code, const char* message) {
 
 enum class State { fresh, initializing, ready, stateless };
 
-Json dispatch(BambuBridge& bridge, const Json& request, State& state, bool enable_control) {
+Json dispatch(BambuBridge& bridge, const Json& request, State& state, bool enable_control,
+              const std::atomic<bool>& running) {
     const auto* id = request.find("id");
     const auto* method = request.find("method");
     const auto* params = request.find("params");
@@ -241,7 +417,7 @@ Json dispatch(BambuBridge& bridge, const Json& request, State& state, bool enabl
         const auto empty = Json::object();
         auto result = envelope(*id);
         try {
-            result.set("result", call_tool(bridge, tool, args ? *args : empty));
+            result.set("result", call_tool(bridge, tool, args ? *args : empty, running));
         } catch (const std::exception&) {
             result.set("result", text_result("Bridge could not execute the tool", true));
         }
@@ -256,21 +432,23 @@ bool supports_mcp_http_version(std::string_view version) {
     return version == "2025-03-26" || version == "2025-06-18" || version == protocol;
 }
 
-std::string dispatch_mcp_http(BambuBridge& bridge, const std::string& body, bool enable_control) {
+std::string dispatch_mcp_http(BambuBridge& bridge, const std::string& body, bool enable_control,
+                              const std::atomic<bool>& running) {
     State state = State::stateless;
     Json request;
-    auto reply = json_parse(body, &request) ? dispatch(bridge, request, state, enable_control)
+    auto reply = json_parse(body, &request) ? dispatch(bridge, request, state, enable_control, running)
                                            : rpc_error(Json::null(), -32700, "Parse error");
     return reply.kind == Json::Null ? std::string{} : json_dump(reply);
 }
 
 bool run_mcp_stdio(BambuBridge& bridge, std::FILE* output, bool enable_control) {
     State state = State::fresh;
+    const std::atomic<bool> running{true};
     std::string line;
     while (std::getline(std::cin, line)) {
         if (line.empty()) continue;
         Json request;
-        auto reply = json_parse(line, &request) ? dispatch(bridge, request, state, enable_control)
+        auto reply = json_parse(line, &request) ? dispatch(bridge, request, state, enable_control, running)
                                                 : rpc_error(Json::null(), -32700, "Parse error");
         if (reply.kind == Json::Null) continue;
         const auto data = json_dump(reply);

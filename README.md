@@ -178,7 +178,7 @@ H3C 的完整 `pushall` 上报里，喷嘴列表位于 `payload.print.device.noz
 }
 ```
 
-两种传输默认都提供 Bridge 状态、设备列表、打印机状态、固件版本和 JPEG 截图。需要暂停、恢复或停止打印时，才在 Bridge 启动参数中添加 `--mcp-enable-control`。
+两种传输默认都提供 Bridge 状态、设备列表、打印机状态、固件版本、JPEG 截图，以及打印机存储的文件列表、缩略图和下载。下载保存到 Bridge 主机并返回本机路径。需要暂停、恢复、停止打印或永久删除打印机文件时，在启动参数中添加 `--mcp-enable-control`；文件删除调用还须显式传入 `confirm: true`。
 
 使用 stdio 时，可在同一系统用户下复用先前 HTTP 登录的默认配置目录；只有登录时指定过自定义目录或非默认区域，才需要在 stdio 参数中沿用。完整参数见 [API 文档](docs/API.md#mcpstdio)。
 
